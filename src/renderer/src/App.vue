@@ -5,6 +5,110 @@ import GameViewport from './components/GameViewport.vue'
 import HierarchyPanel from './components/HierarchyPanel.vue'
 import InspectorPanel from './components/InspectorPanel.vue'
 import { IGameNode } from './types/schema'
+import * as THREE from 'three'
+
+// 辅助：从 JSON 数据递归计算某节点的世界矩阵
+const computeWorldMatrix = (nodeId: string, allNodes: IGameNode[]): THREE.Matrix4 => {
+  const stack: IGameNode[] = []
+  
+  // 1. 向上查找路径 (回溯法)
+  const findPath = (nodes: IGameNode[], targetId: string, path: IGameNode[]): boolean => {
+    for (const node of nodes) {
+      path.push(node)
+      if (node.id === targetId) return true
+      if (node.children && findPath(node.children, targetId, path)) return true
+      path.pop()
+    }
+    return false
+  }
+
+  if (!findPath(allNodes, nodeId, stack)) {
+    return new THREE.Matrix4() // 没找到，返回单位矩阵
+  }
+
+  // 2. 从根节点开始，逐级累乘矩阵
+  const worldMat = new THREE.Matrix4()
+  const localMat = new THREE.Matrix4()
+  const tempPos = new THREE.Vector3()
+  const tempQuat = new THREE.Quaternion()
+  const tempScale = new THREE.Vector3()
+
+  for (const node of stack) {
+    // 构建局部矩阵
+    tempPos.set(...node.position)
+    // 欧拉角转四元数 (注意 Euler Order，默认 XYZ)
+    const euler = new THREE.Euler(node.rotation[0], node.rotation[1], node.rotation[2], 'XYZ')
+    tempQuat.setFromEuler(euler)
+    tempScale.set(...node.scale)
+
+    localMat.compose(tempPos, tempQuat, tempScale)
+    
+    // 世界 = 父世界 * 本地
+    worldMat.multiply(localMat)
+  }
+
+  return worldMat
+}
+
+const moveNode = (nodeId: string, newParentId: string | null) => {
+  // 1. 找到要移动的节点对象
+  const node = findNodeRecursive(sceneNodes.value, nodeId)
+  if (!node) return
+
+  // 防止自己拖给自己，或者拖给自己的子孙（会导致死循环）
+  if (nodeId === newParentId) return
+  // TODO: 还需要检查 newParentId 是否是 node 的子孙
+
+  // 2. 计算节点当前的【世界变换】(在移动前)
+  const oldWorldMatrix = computeWorldMatrix(nodeId, sceneNodes.value)
+
+  // 3. 从旧父级中移除 (Data Operation)
+  deleteNodeRecursive(sceneNodes.value, nodeId) // 注意：这里需要稍微改造 deleteNode 仅移除引用不销毁
+
+  // 4. 计算新父级的【世界逆矩阵】
+  const newParentInverse = new THREE.Matrix4()
+  
+  if (newParentId) {
+    // 如果有父级，计算父级的世界矩阵，然后求逆
+    const parentWorldMatrix = computeWorldMatrix(newParentId, sceneNodes.value)
+    newParentInverse.copy(parentWorldMatrix).invert()
+  } else {
+    // 如果拖到根目录，父级矩阵就是单位矩阵 (Identity)
+    // inverse 也是 Identity，不用动
+  }
+
+  // 5. 【关键】计算新的局部矩阵
+  // NewLocal = Inverse(NewParentWorld) * OldWorld
+  const newLocalMatrix = new THREE.Matrix4()
+  newLocalMatrix.multiplyMatrices(newParentInverse, oldWorldMatrix)
+
+  // 6. 分解矩阵，应用到节点数据
+  const newPos = new THREE.Vector3()
+  const newQuat = new THREE.Quaternion()
+  const newScale = new THREE.Vector3()
+  
+  newLocalMatrix.decompose(newPos, newQuat, newScale)
+
+  node.position = [newPos.x, newPos.y, newPos.z]
+  // 四元数转回欧拉角 (为了保持 Inspector 可读性)
+  const newEuler = new THREE.Euler().setFromQuaternion(newQuat, 'XYZ')
+  node.rotation = [newEuler.x, newEuler.y, newEuler.z]
+  node.scale = [newScale.x, newScale.y, newScale.z]
+
+  // 7. 插入到新位置 (Data Operation)
+  if (newParentId) {
+    const newParent = findNodeRecursive(sceneNodes.value, newParentId)
+    if (newParent) {
+      if (!newParent.children) newParent.children = []
+      newParent.children.push(node)
+    }
+  } else {
+    // 插入到根目录
+    sceneNodes.value.push(node)
+  }
+  
+  console.log(`[Engine] Moved ${node.name} to ${newParentId || 'Root'} (Auto-converted Transform)`)
+}
 
 const projectRoot = ref<string | null>(null) // 当前项目的根目录路径
 
@@ -216,7 +320,7 @@ const deleteNode = (id: string) => {
 }
 
 // 提供编辑器动作给子组件
-provide('editor-actions', { addNode, deleteNode })
+provide('editor-actions', { addNode, deleteNode, moveNode })
 
 // 【新增】计算出当前选中的 Node 对象
 // 这样 InspectorPanel 就能直接拿到对象进行修改，利用 Vue 的引用特性实现双向绑定
