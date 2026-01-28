@@ -45,7 +45,13 @@ const attachCollider = (targetBody: RAPIER_TYPE.RigidBody, isChild: boolean) => 
 
   let colliderDesc: RAPIER_TYPE.ColliderDesc | null = null
   const colliderType = rbProps?.colliderType || 'primitive'
-  const scale = props.node.scale || [1, 1, 1]
+  
+  // 🔴 FIX START: 使用世界缩放，而不是局部 node.scale
+  // 这样如果父级缩放了，子物体的碰撞箱也会正确地"变小"
+  const scale = new THREE.Vector3()
+  props.object3d.updateWorldMatrix(true, false) // 确保矩阵是最新的
+  props.object3d.getWorldScale(scale)
+  // 🔴 FIX END
 
   // === 1. 生成碰撞体描述 (Hull / Trimesh / Primitive) ===
   const shouldUseMesh = colliderType === 'hull' || colliderType === 'trimesh'
@@ -58,14 +64,13 @@ const attachCollider = (targetBody: RAPIER_TYPE.RigidBody, isChild: boolean) => 
       const vertices = new Float32Array(posAttr.count * 3)
       // 烘焙缩放
       for (let i = 0; i < posAttr.count; i++) {
-        vertices[i * 3 + 0] = posAttr.getX(i) * scale[0]
-        vertices[i * 3 + 1] = posAttr.getY(i) * scale[1]
-        vertices[i * 3 + 2] = posAttr.getZ(i) * scale[2]
+        vertices[i * 3 + 0] = posAttr.getX(i) * scale.x // 使用 .x .y .z
+        vertices[i * 3 + 1] = posAttr.getY(i) * scale.y
+        vertices[i * 3 + 2] = posAttr.getZ(i) * scale.z
       }
       if (colliderType === 'hull') {
         colliderDesc = RAPIER.ColliderDesc.convexHull(vertices)
       } else if (geometry.index) {
-        // 强制转为 Uint32Array 避免索引溢出/错乱
         const indices = new Uint32Array(geometry.index.array)
         colliderDesc = RAPIER.ColliderDesc.trimesh(vertices, indices)
       }
@@ -74,22 +79,26 @@ const attachCollider = (targetBody: RAPIER_TYPE.RigidBody, isChild: boolean) => 
 
   if (!colliderDesc) {
     const args = meshProps.args || []
+    // 注意：这里用 scale.x, scale.y, scale.z 替换数组索引
     switch (meshProps.geometry) {
       case 'Box':
         colliderDesc = RAPIER.ColliderDesc.cuboid(
-          (args[0]??1)*scale[0]/2, 
-          (args[1]??1)*scale[1]/2, 
-          (args[2]??1)*scale[2]/2
+          (args[0]??1) * scale.x / 2, 
+          (args[1]??1) * scale.y / 2, 
+          (args[2]??1) * scale.z / 2
         )
         break
       case 'Sphere':
-        colliderDesc = RAPIER.ColliderDesc.ball((args[0]??1)*Math.max(scale[0], scale[1], scale[2]))
+        // 球体通常取最大轴缩放，或者均匀缩放
+        colliderDesc = RAPIER.ColliderDesc.ball(
+          (args[0]??1) * Math.max(scale.x, scale.y, scale.z)
+        )
         break
       case 'Plane':
         colliderDesc = RAPIER.ColliderDesc.cuboid(
-          (args[0]??1)*scale[0]/2, 
-          (args[1]??1)*scale[1]/2, 
-          0.005*scale[2]
+          (args[0]??1) * scale.x / 2, 
+          (args[1]??1) * scale.y / 2, 
+          0.005 * scale.z // 平面厚度也受 Z 轴缩放影响
         )
         break
     }
