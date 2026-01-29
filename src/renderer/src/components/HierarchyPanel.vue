@@ -24,6 +24,12 @@ const handleContextMenu = (e: MouseEvent, node?: IGameNode) => {
     {
       label: 'Create Object',
       children: [
+        { 
+          label: 'Empty Object', 
+          icon: '⬜', 
+          action: () => editorActions.addNode('Empty', 'Empty', parentId) 
+        },
+        { separator: true },
         {
           label: '3D Mesh',
           children: [

@@ -2,13 +2,18 @@
 import { onMounted, onUnmounted, provide, shallowRef } from 'vue'
 import { useLoop } from '@tresjs/core'
 import RAPIER from '@dimforge/rapier3d-compat'
-import { Time, Input } from '../../engine/Engine' // 🟢 确保路径正确
+import { Time, Input } from '../../engine/Engine'
 
 const isReady = shallowRef(false)
 const world = shallowRef<RAPIER.World | null>(null)
 
+const preStepCallbacks = new Set<() => void>()
+const registerPreStep = (cb: () => void) => preStepCallbacks.add(cb)
+const unregisterPreStep = (cb: () => void) => preStepCallbacks.delete(cb)
+
 provide('physics-world', world)
 provide('rapier-instance', RAPIER)
+provide('physics-pre-step', { register: registerPreStep, unregister: unregisterPreStep })
 
 onMounted(async () => {
   try {
@@ -23,30 +28,39 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (world.value) world.value.free()
-  // 🟢 退出时解锁鼠标
   Input.unlockCursor()
+  preStepCallbacks.clear()
 })
 
-// 🟢 修复核心：只取 onBeforeRender，不取 onAfterRender
 const { onBeforeRender } = useLoop()
 
+// 🟢 任务 1：输入系统快照 (优先级 999)
+// 这是每一帧做的第一件事！确保后续所有逻辑读到的输入都是一致的
+onBeforeRender(() => {
+  Input.update()
+}, 999)
+
+// 🟢 任务 2：物理模拟 (优先级 1)
 onBeforeRender(({ delta, elapsed }) => {
-  // 1. 更新全局时间
   Time.deltaTime = delta
   Time.time = elapsed
 
-  // 2. 物理步进
   if (world.value && isReady.value) {
-    world.value.step()
+    // 亚步进逻辑
+    const substeps = 4;
+    const subDt = 1 / (60 * substeps);
+    world.value.timestep = subDt;
+
+    for (let i = 0; i < substeps; i++) {
+      preStepCallbacks.forEach(cb => cb())
+      world.value.step()
+    }
   }
-  
-  // 🟢 3. 帧末重置 (替代 onAfterRender)
-  // 使用 setTimeout(0) 将重置逻辑推到当前帧的最后执行
-  // 这样保证了所有脚本在 onUpdate 里都能读到当前的 Input
-  setTimeout(() => {
-    Input._resetFrame()
-  }, 0)
-})
+}, 1)
+
+// 任务 3 (默认 ScriptRunner 优先级是 0)，会在上面两个之后执行
+// 此时 Script 读取的是 Input 的快照，稳得一批。
+
 </script>
 
 <template>

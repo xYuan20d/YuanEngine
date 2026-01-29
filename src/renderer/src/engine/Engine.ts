@@ -1,21 +1,25 @@
 // src/engine/Engine.ts
 import * as THREE from 'three'
 
-// 保持原有的枚举和接口不变...
-export enum PropType { Number = 'number', String = 'string', Boolean = 'boolean', Vector3 = 'vector3', Color = 'color', Asset = 'asset' }
+export enum PropType { Number = 'number', String = 'string', Boolean = 'boolean', Vector3 = 'vector3', Color = 'color', Asset = 'asset', Node = 'node' }
 export interface ScriptProperty { type: PropType, default: any, label?: string, min?: number, max?: number, step?: number }
 
-// 🟢 1. 纯 JS 实现的 Input 类
+// 🟢 1. 双重缓冲 Input 类
 export class Input {
-  // 记录按键状态
   private static _keys = new Set<string>();
   private static _mouseButtons = new Set<number>();
-  
-  // 记录鼠标这一帧的偏移量
-  public static mouseDeltaX = 0;
-  public static mouseDeltaY = 0;
 
-  // 初始化监听器 (只运行一次)
+  // --- 缓冲池 (Buffer) ---
+  // 这里存储浏览器异步发来的、还没被游戏处理的原始数据
+  private static _bufferMouseX = 0;
+  private static _bufferMouseY = 0;
+
+  // --- 快照 (Snapshot) ---
+  // 这里存储当前这一帧锁定的数据，所有脚本读的都是这里
+  // 在这一帧内，无论读多少次，这个值都是不变的（稳如老狗）
+  private static _frameMouseX = 0;
+  private static _frameMouseY = 0;
+
   static _init() {
     if ((window as any)._inputInited) return;
     (window as any)._inputInited = true;
@@ -25,21 +29,29 @@ export class Input {
     window.addEventListener('keyup', (e) => this._keys.delete(e.key.toLowerCase()));
 
     // 鼠标按键
-    window.addEventListener('mousedown', (e) => {
-      this._mouseButtons.add(e.button);
-      // 如果点击了画布，且脚本请求锁定，这里是最好的触发时机
-    });
+    window.addEventListener('mousedown', (e) => this._mouseButtons.add(e.button));
     window.addEventListener('mouseup', (e) => this._mouseButtons.delete(e.button));
 
-    // 🟢 鼠标移动 (核心)
-    // movementX 是浏览器原生提供的“上一帧到现在的偏移量”
+    // 🟢 鼠标移动：只负责往缓冲池里加水
     window.addEventListener('mousemove', (e) => {
-      this.mouseDeltaX += e.movementX;
-      this.mouseDeltaY += e.movementY;
+      this._bufferMouseX += e.movementX;
+      this._bufferMouseY += e.movementY;
     });
   }
 
-  // --- 用户 API ---
+  // 🟢 帧更新 (由 PhysicsSystem 在每帧最开始调用)
+  // 这就是“交换缓冲区”的操作
+  static update() {
+    // 1. 把缓冲池的数据“快照”下来
+    this._frameMouseX = this._bufferMouseX;
+    this._frameMouseY = this._bufferMouseY;
+
+    // 2. 清空缓冲池，准备接收下一帧的输入
+    this._bufferMouseX = 0;
+    this._bufferMouseY = 0;
+  }
+
+  // --- 用户 API (只读快照) ---
 
   static getKey(key: string): boolean {
     return this._keys.has(key.toLowerCase());
@@ -49,31 +61,23 @@ export class Input {
     return this._mouseButtons.has(button);
   }
 
-  // 获取轴 (仿 Unity)
   static getAxis(axis: 'Mouse X' | 'Mouse Y'): number {
-    if (axis === 'Mouse X') return this.mouseDeltaX;
-    if (axis === 'Mouse Y') return this.mouseDeltaY;
+    // 返回快照数据
+    if (axis === 'Mouse X') return this._frameMouseX;
+    if (axis === 'Mouse Y') return this._frameMouseY;
     return 0;
   }
 
-  // 锁定鼠标
   static lockCursor() {
     document.body.requestPointerLock();
   }
 
-  // 解锁鼠标
   static unlockCursor() {
     document.exitPointerLock();
   }
 
   static get isCursorLocked() {
     return document.pointerLockElement !== null;
-  }
-
-  // 帧末重置 (由 PhysicsSystem 调用)
-  static _resetFrame() {
-    this.mouseDeltaX = 0;
-    this.mouseDeltaY = 0;
   }
 }
 
@@ -86,7 +90,7 @@ export class Time {
 // 🟢 3. 初始化
 Input._init();
 
-// Behaviour 基类 (保持不变，略去以节省篇幅，记得包含 getRigidBody 等新加的方法)
+// Behaviour 基类 (保持不变)
 export class Behaviour {
   public gameObject: THREE.Object3D;
   public transform: THREE.Object3D;
@@ -106,14 +110,16 @@ export class Behaviour {
     return this.gameObject.userData.characterController;
   }
 
-  // 🟢 获取碰撞体 (KCC 计算需要用到碰撞体引用)
   getCollider() {
     const body = this.getRigidBody();
     if (body && body.numColliders() > 0) {
-      // 获取该刚体的第一个碰撞体
       return body.collider(0); 
     }
     return null;
+  }
+
+  getVehicle() {
+    return this.gameObject.userData.vehicle;
   }
 
   onStart(): void {}

@@ -10,7 +10,6 @@ const props = defineProps<{
 const { showContextMenu } = useContextMenu()
 
 const handleAddClick = (e: MouseEvent) => {
-  // 定义菜单结构
   const menuConfig = [
     {
       label: 'Rendering',
@@ -29,8 +28,6 @@ const handleAddClick = (e: MouseEvent) => {
           label: 'Mesh (Override)',
           icon: '🧊',
           action: () => {
-            // 如果已有 Mesh，通常是替换还是叠加？ECS允许叠加，但渲染可能重叠
-            // 这里简单 push，用户可以自己删旧的
             props.node.components.push({
                type: 'Mesh', 
                props: { geometry: 'Box', args: [1, 1, 1], color: '#ffffff' } 
@@ -46,15 +43,48 @@ const handleAddClick = (e: MouseEvent) => {
           label: 'Rigid Body',
           icon: '🍎',
           action: () => {
-            // 只有挂了 RigidBody，物体才会掉下来
-            // 否则它就是个静止的墙
             props.node.components.push({
               type: 'RigidBody',
               props: {
                 bodyType: 'dynamic',
                 mass: 1.0,
-                restitution: 0.5, // 弹性
-                friction: 0.5     // 摩擦
+                restitution: 0.5,
+                friction: 0.5
+              }
+            })
+          }
+        },
+        // 🟢 新增：车辆系统分隔线
+        { separator: true },
+        {
+          label: 'Vehicle Chassis',
+          icon: '🚗',
+          action: () => {
+            // 车身组件：默认给一点重心下移，防止翻车
+            props.node.components.push({
+              type: 'VehicleChassis',
+              props: {
+                // Y轴下移 0.5 米，让重心在底盘下方
+                centerOfMassOffset: [0, -0.5, 0] 
+              }
+            })
+          }
+        },
+        {
+          label: 'Vehicle Wheel',
+          icon: '🛞',
+          action: () => {
+            // 车轮组件：默认参数
+            props.node.components.push({
+              type: 'VehicleWheel',
+              props: {
+                isSteering: false, // 默认不转向
+                isDrive: false,    // 默认不驱动
+                radiusScale: 1.0,  // 自动计算半径
+                suspensionRestLength: 0.3, // 悬挂长度
+                suspensionStiffness: 50.0, // 硬度
+                maxSuspensionTravel: 0.2,  // 行程
+                brakeForce: 1.0
               }
             })
           }
@@ -71,18 +101,13 @@ const handleAddClick = (e: MouseEvent) => {
             props.node.components.push({ 
               type: 'Script', 
               props: { 
-                src: '', // 留空让用户填写路径
+                src: '', 
                 userValues: {} 
               } 
             })
           } 
         }
       ]
-    },
-    { separator: true },
-    {
-       label: 'Physics (Coming Soon)',
-       disabled: true
     }
   ]
 
@@ -97,10 +122,11 @@ const handleAddClick = (e: MouseEvent) => {
 </template>
 
 <style scoped>
+/* 样式保持不变 */
 .add-component-btn {
   width: 100%; 
   padding: 8px; 
-  margin-top: 15px; /* 增加一点顶部间距 */
+  margin-top: 15px; 
   background: #fff; 
   border: 1px solid #dcdfe6; 
   border-radius: 4px;

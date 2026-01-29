@@ -2,6 +2,7 @@
 import { defineProps, reactive, watch, inject } from 'vue'
 import { IGameNode } from '../types/schema'
 import InspectorAddComponent from './InspectorAddComponent.vue' // [新增] 引入组件
+import NodePicker from './properties/NodePicker.vue'
 
 // 接收完整的 Node 对象
 const props = defineProps<{
@@ -252,6 +253,68 @@ watch(() => props.node?.id, (newId) => {
           </div>
         </div>
 
+        <div v-else-if="comp.type === 'VehicleChassis'" class="component-content">
+          <div class="prop-row">
+            <div class="label" title="Center of Mass Offset (x, y, z)">CoM Offset</div>
+            <div class="vector3-inputs">
+              <div class="input-group x-axis">
+                <span class="axis-label">X</span>
+                <input type="number" step="0.1" 
+                  :value="comp.props.centerOfMassOffset?.[0] ?? 0"
+                  @input="e => { if(!comp.props.centerOfMassOffset) comp.props.centerOfMassOffset=[0,0,0]; comp.props.centerOfMassOffset[0] = parseFloat((e.target as any).value) }"
+                >
+              </div>
+              <div class="input-group y-axis">
+                <span class="axis-label">Y</span>
+                <input type="number" step="0.1" 
+                  :value="comp.props.centerOfMassOffset?.[1] ?? 0"
+                  @input="e => { if(!comp.props.centerOfMassOffset) comp.props.centerOfMassOffset=[0,0,0]; comp.props.centerOfMassOffset[1] = parseFloat((e.target as any).value) }"
+                >
+              </div>
+              <div class="input-group z-axis">
+                <span class="axis-label">Z</span>
+                <input type="number" step="0.1" 
+                  :value="comp.props.centerOfMassOffset?.[2] ?? 0"
+                  @input="e => { if(!comp.props.centerOfMassOffset) comp.props.centerOfMassOffset=[0,0,0]; comp.props.centerOfMassOffset[2] = parseFloat((e.target as any).value) }"
+                >
+              </div>
+            </div>
+          </div>
+          <div class="prop-info" style="font-size:10px; color:#999; margin-top:4px;">
+            Tip: Set Y to -0.5 or lower to prevent flipping.
+          </div>
+        </div>
+
+        <div v-else-if="comp.type === 'VehicleWheel'" class="component-content">
+          <div class="prop-row">
+            <div class="label">Is Steering</div>
+            <input type="checkbox" v-model="comp.props.isSteering">
+          </div>
+          <div class="prop-row">
+            <div class="label">Is Drive</div>
+            <input type="checkbox" v-model="comp.props.isDrive">
+          </div>
+          
+          <div style="height:1px; background:#eee; margin:5px 0;"></div>
+
+          <div class="prop-row">
+            <div class="label" title="Radius Scale">Rad Scale</div>
+            <input class="simple-input" type="number" step="0.1" v-model.number="comp.props.radiusScale">
+          </div>
+          <div class="prop-row">
+            <div class="label" title="Suspension Rest Length">Sus Length</div>
+            <input class="simple-input" type="number" step="0.05" v-model.number="comp.props.suspensionRestLength">
+          </div>
+          <div class="prop-row">
+            <div class="label" title="Suspension Stiffness">Stiffness</div>
+            <input class="simple-input" type="number" step="1" v-model.number="comp.props.suspensionStiffness">
+          </div>
+          <div class="prop-row">
+             <div class="label" title="Max Travel">Max Travel</div>
+             <input class="simple-input" type="number" step="0.05" v-model.number="comp.props.maxSuspensionTravel">
+          </div>
+        </div>
+
         <div v-else-if="comp.type === 'RigidBody'" class="component-content">
 
           <div class="prop-row">
@@ -365,6 +428,13 @@ watch(() => props.node?.id, (newId) => {
                   <span class="axis-label">Z</span>
                   <input type="number" step="0.1" v-model.number="comp.props.userValues[key][2]">
                 </div>
+              </div>
+
+              <div v-else-if="def.type === 'node'" style="flex:1;">
+                <NodePicker 
+                  v-model:value="comp.props.userValues[key]" 
+                  :label="def.label || key"
+                />
               </div>
 
             </div>

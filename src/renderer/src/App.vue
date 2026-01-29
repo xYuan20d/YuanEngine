@@ -114,6 +114,26 @@ const projectRoot = ref<string | null>(null) // 当前项目的根目录路径
 
 provide('project-root', projectRoot)
 
+const nodesMap = computed(() => {
+  const map = new Map<string, IGameNode>()
+  
+  const traverse = (nodes: IGameNode[]) => {
+    for (const node of nodes) {
+      map.set(node.id, node) // 存入 Map
+      if (node.children) {
+        traverse(node.children)
+      }
+    }
+  }
+  
+  traverse(sceneNodes.value)
+  return map
+})
+
+// 🟢 2. 新增：注入给所有子组件使用
+// 这样 NodePicker.vue 里的 inject('nodes-map') 就能拿到数据了
+provide('nodes-map', nodesMap)
+
 onMounted(() => {
   window.fileSystem.onRequestSave(async () => {
     
@@ -217,29 +237,28 @@ const hasMainCamera = (nodes: IGameNode[]): boolean => {
 }
 
 // --- 添加节点函数（升级版：支持指定父节点）---
-const addNode = (type: 'Mesh' | 'Light' | 'Camera', subtype: string, parentId?: string) => {
+const addNode = (type: 'Mesh' | 'Light' | 'Camera' | 'Empty', subtype: string, parentId?: string) => {
   const id = 'node_' + Date.now()
   
-  // 创建新节点数据
+  // 1. 基础结构
   const newNode: IGameNode = {
     id,
-    name: `New ${subtype}`,
+    name: subtype === 'Empty' ? 'New Empty' : `New ${subtype}`,
     active: true,
     position: [0, 0, 0],
     rotation: [0, 0, 0],
     scale: [1, 1, 1],
-    components: [],
-    children: [] // 必须初始化 children 数组
+    components: [], 
+    children: [] 
   }
 
+  // 2. 根据类型添加组件
   if (type === 'Camera') {
-    // 检查当前场景是否已经有主摄像机
     const alreadyHasMain = hasMainCamera(sceneNodes.value)
-    
     newNode.components.push({
       type: 'Camera',
       props: {
-        isMain: !alreadyHasMain, // 如果没有主摄，我就是主摄
+        isMain: !alreadyHasMain,
         fov: 60,
         near: 0.1,
         far: 1000
@@ -247,59 +266,47 @@ const addNode = (type: 'Mesh' | 'Light' | 'Camera', subtype: string, parentId?: 
     })
     newNode.name = 'Camera'
   }
-  // 根据类型填充组件
   else if (type === 'Mesh') {
-    if (subtype === 'Empty') {
-      // 空物体没有 Mesh 组件
-      newNode.name = 'New Empty'
-    } else {
-      if (subtype === 'Empty') {
-      newNode.name = 'New Empty'
-    } else {
-      // 🟢 核心修复开始
-      let defaultArgs = [1, 1, 1] // 默认给 Box 用
+    // 🟢 修复：Mesh 分支只处理真正的模型，不再处理 Empty
+    let defaultArgs = [1, 1, 1] 
 
-      if (subtype === 'Sphere') {
-        // 球体参数: [半径, 水平分段数, 垂直分段数]
-        // 32 和 16 是比较标准的"看起来像圆"的数值
-        defaultArgs = [1, 32, 16] 
-      } else if (subtype === 'Plane') {
-        // 平面参数: [宽, 高]
-        defaultArgs = [2, 2] 
-      }
-      
-      newNode.components.push({
-        type: 'Mesh',
-        props: { geometry: subtype, args: defaultArgs, color: '#ffffff' }
-      })
-      // 🟢 核心修复结束
+    if (subtype === 'Sphere') {
+      defaultArgs = [1, 32, 16] 
+    } else if (subtype === 'Plane') {
+      defaultArgs = [2, 2] 
     }
-  }
-  } else if (type === 'Light') {
+    
+    // 只有非 Empty 才会加 Mesh 组件
+    // 如果你之前的菜单里有 "Mesh -> Empty"，现在那个选项会报错或者生成无 Mesh 的物体
+    // 建议把菜单里的 Empty 移到专门的 "Create Empty" 按钮去
+    newNode.components.push({
+      type: 'Mesh',
+      props: { geometry: subtype, args: defaultArgs, color: '#ffffff' }
+    })
+  } 
+  else if (type === 'Light') {
     newNode.components.push({
       type: 'Light',
       props: { intensity: 1, color: '#ffffff' }
     })
+  } 
+  else if (type === 'Empty') {
+    // 🟢 空对象分支：什么都不做，保持 components 为空
+    // 只是为了逻辑清晰，显式写出来
+    newNode.name = 'Empty Object' 
   }
 
-  // 核心逻辑：判断是插入根节点还是子节点
+  // 3. 插入到场景树 (保持不变)
   if (parentId) {
-    // 查找父节点
     const parent = findNodeRecursive(sceneNodes.value, parentId)
     if (parent) {
-      // 确保父节点的 children 数组存在
       if (!parent.children) parent.children = []
       parent.children.push(newNode)
-      
-      console.log(`[Engine] Added ${newNode.name} as child of ${parent.name}`)
     } else {
-      console.warn(`[Engine] Parent ${parentId} not found, adding to root.`)
       sceneNodes.value.push(newNode)
     }
   } else {
-    // 没有 parentId，默认添加到根目录
     sceneNodes.value.push(newNode)
-    console.log(`[Engine] Added ${newNode.name} to root`)
   }
 }
 

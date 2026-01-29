@@ -4,12 +4,13 @@ import { IGameNode } from '../types/schema'
 import * as THREE from 'three'
 import CameraGizmo from './CameraGizmo.vue' 
 import ScriptRunner from './ScriptRunner.vue'
-import PhysicsItem from './physics/PhysicsItem.vue' // 确保引入
+import PhysicsItem from './physics/PhysicsItem.vue' 
 
 defineOptions({ name: 'GameEntity' })
 
 const props = defineProps<{ node: IGameNode }>()
 
+// 场景注册表 (用于 CameraRig 等快速查找)
 const registry = inject<{ 
   register: (id: string, obj: THREE.Object3D) => void,
   unregister: (id: string) => void
@@ -18,32 +19,25 @@ const registry = inject<{
 const groupRef = shallowRef<THREE.Group | null>(null)
 const isPlaying = inject('is-playing', { value: false })
 
-// 🟢 1. 刚体接力系统
-// A. 接收上级传下来的刚体 (可能是父亲的，也可能是爷爷的)
+// 刚体接力 (Physics)
 const upstreamBodyRef = inject('parent-body-ref', ref(null))
-
-// B. 定义我自己创建的刚体 (如果有)
 const myBodyRef = shallowRef(null)
 
-// C. 判断我是否是“刚体拥有者”
 const hasRigidBodyComponent = computed(() => 
   props.node.components.some(c => c.type === 'RigidBody')
 )
 
-// D. 决定传给孩子什么：我有刚体就传我的，没有就透传上级的
 const bodyToProvide = computed(() => 
   hasRigidBodyComponent.value ? myBodyRef.value : upstreamBodyRef.value
 )
 
-// E. 向下提供 (Provide)
 provide('parent-body-ref', bodyToProvide)
 
-// F. 回调：当 PhysicsItem 创建完刚体后，通知我更新 myBodyRef
 const onPhysicsCreated = (body: any) => {
   myBodyRef.value = body
 }
 
-// ... 常规注册逻辑 ...
+// 注册 Three.js 对象到 Map 中
 watch(groupRef, (group) => {
   if (group && registry) registry.register(props.node.id, group)
 }, { immediate: true })
@@ -62,12 +56,15 @@ const scale = computed(() => [...props.node.scale])
     ref="groupRef"
     :position="position" 
     :rotation="rotation" 
-    :scale="scale"     
+    :scale="scale"
     :user-data="{ id: node.id }" 
   >
     <template v-for="(comp, index) in node.components" :key="index">
       
-      <TresMesh v-if="comp.type === 'Mesh'">
+      <TresMesh 
+        v-if="comp.type === 'Mesh'"
+        :user-data="{ id: node.id }" 
+      >
         <TresBoxGeometry v-if="comp.props.geometry === 'Box'" :args="comp.props.args" />
         <TresSphereGeometry v-else-if="comp.props.geometry === 'Sphere'" :args="comp.props.args" />
         <TresPlaneGeometry v-else-if="comp.props.geometry === 'Plane'" :args="comp.props.args" />
@@ -75,7 +72,7 @@ const scale = computed(() => [...props.node.scale])
       </TresMesh>
 
       <ScriptRunner 
-        v-if="comp.type === 'Script'"
+        v-if="isPlaying.value && comp.type === 'Script'"
         :node-id="node.id"
         :script-path="comp.props.src"
         :user-values="comp.props.userValues"
