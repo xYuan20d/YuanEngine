@@ -62,10 +62,13 @@ const loadScript = async () => {
 
     // 🟢 3. 稳健注入：手动在代码头部加上变量声明
     // 确保脚本内可以直接使用 Behaviour, PropType, THREE 等
+    // (如果你在 Engine.ts 里把 Input 和 Time 也挂载到了 window，建议在这里也加上 const Input = window.Input;)
     const headerInjection = `
       const Behaviour = window.Behaviour; 
       const PropType = window.PropType;
       const THREE = window.THREE;
+      const Input = window.Input;
+      const Time = window.Time;
     `;
     
     // sourceURL 使用短路径，方便在 DevTools 里辨识
@@ -100,6 +103,15 @@ const loadScript = async () => {
     // 🟢 6. 实例化与生命周期
     const instance = new ScriptClass(gameObject, props.component)
     
+    // ========== 🟢 新增部分：挂载实例供物理系统使用 ==========
+    // 这一步是为了让 PhysicsSystem 在分发事件时，
+    // 能通过 object3D.userData.scripts 找到这个脚本实例
+    if (!gameObject.userData.scripts) {
+      gameObject.userData.scripts = []
+    }
+    gameObject.userData.scripts.push(instance)
+    // ======================================================
+
     // 注入 Inspector 面板的数据
     if (props.userValues) {
       instance.inputs = { ...props.userValues }

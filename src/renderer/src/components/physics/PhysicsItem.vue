@@ -17,6 +17,10 @@ const worldRef = inject<shallowRef<RAPIER_TYPE.World | null>>('physics-world')
 const RAPIER = inject<typeof RAPIER_TYPE>('rapier-instance')!
 const parentBodyRef = inject<Ref<RAPIER_TYPE.RigidBody | null>>('parent-body-ref', shallowRef(null))
 const preStepSystem = inject<{ register: (cb: any) => void, unregister: (cb: any) => void }>('physics-pre-step')
+const registry = inject<{
+  register: (h: number, n: string) => void,
+  unregister: (h: number) => void
+}>('collision-registry')
 
 let rigidBody: RAPIER_TYPE.RigidBody | null = null
 let collider: RAPIER_TYPE.Collider | null = null
@@ -123,7 +127,14 @@ const attachCollider = (targetBody: RAPIER_TYPE.RigidBody, isChild: boolean) => 
     colliderDesc.setRotation(relQuat)
   }
 
+  colliderDesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS)
+
   collider = worldRef.value.createCollider(colliderDesc, targetBody)
+
+  // 注册 ID 映射
+  if (collider && registry) {
+    registry.register(collider.handle, props.node.id)
+  }
 }
 
 // --- 2. Setup Vehicle ---
@@ -256,7 +267,7 @@ const initPhysics = () => {
     }
 
     if (type === 'kinematicPositionBased') {
-      characterController = world.createCharacterController(0.01)
+      characterController = world.createCharacterController(0.0)
       characterController.setMaxSlopeClimbAngle(45 * (Math.PI / 180))
       characterController.enableAutostep(0.3, 0.1, true)
       characterController.enableSnapToGround(0.2)
@@ -390,6 +401,10 @@ onUnmounted(() => {
     props.object3d.userData.physicsBody = null
     props.object3d.userData.characterController = null
     props.object3d.userData.vehicle = null
+  }
+
+  if (collider && registry) {
+    registry.unregister(collider.handle)
   }
 })
 </script>

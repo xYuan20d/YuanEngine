@@ -4,7 +4,7 @@ import * as THREE from 'three'
 export enum PropType { Number = 'number', String = 'string', Boolean = 'boolean', Vector3 = 'vector3', Color = 'color', Asset = 'asset', Node = 'node' }
 export interface ScriptProperty { type: PropType, default: any, label?: string, min?: number, max?: number, step?: number }
 
-// 🟢 1. 双重缓冲 Input 类
+// 双重缓冲
 export class Input {
   private static _keys = new Set<string>();
   private static _mouseButtons = new Set<number>();
@@ -32,14 +32,14 @@ export class Input {
     window.addEventListener('mousedown', (e) => this._mouseButtons.add(e.button));
     window.addEventListener('mouseup', (e) => this._mouseButtons.delete(e.button));
 
-    // 🟢 鼠标移动：只负责往缓冲池里加水
+    // 鼠标移动：只负责往缓冲池里加水
     window.addEventListener('mousemove', (e) => {
       this._bufferMouseX += e.movementX;
       this._bufferMouseY += e.movementY;
     });
   }
 
-  // 🟢 帧更新 (由 PhysicsSystem 在每帧最开始调用)
+  // 帧更新 (由 PhysicsSystem 在每帧最开始调用)
   // 这就是“交换缓冲区”的操作
   static update() {
     // 1. 把缓冲池的数据“快照”下来
@@ -81,16 +81,16 @@ export class Input {
   }
 }
 
-// 🟢 2. Time 类
+// Time 类
 export class Time {
   public static deltaTime = 0;
   public static time = 0;
 }
 
-// 🟢 3. 初始化
+// 初始化
 Input._init();
 
-// Behaviour 基类 (保持不变)
+// 基类
 export class Behaviour {
   public gameObject: THREE.Object3D;
   public transform: THREE.Object3D;
@@ -127,4 +127,9 @@ export class Behaviour {
   onDestroy(): void {}
   
   getRigidBody() { return this.gameObject.userData.physicsBody; }
+
+  onTriggerEnter(other: THREE.Object3D): void {}
+  onTriggerExit(other: THREE.Object3D): void {}
+  onCollisionEnter(other: THREE.Object3D): void {}
+  onCollisionExit(other: THREE.Object3D): void {}
 }
