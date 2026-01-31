@@ -69,6 +69,7 @@ const loadScript = async () => {
       const THREE = window.THREE;
       const Input = window.Input;
       const Time = window.Time;
+      const RAPIER = window.RAPIER;
     `;
     
     // sourceURL 使用短路径，方便在 DevTools 里辨识

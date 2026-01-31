@@ -57,6 +57,7 @@ const scale = computed(() => [...props.node.scale])
     :position="position" 
     :rotation="rotation" 
     :scale="scale"
+    :name="node.name"
     :user-data="{ id: node.id }" 
   >
     <template v-for="(comp, index) in node.components" :key="index">

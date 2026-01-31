@@ -17,6 +17,8 @@ export interface IComponent {
     restitution?: number // 弹性
     friction?: number    // 摩擦力
     colliderType?: 'primitive' | 'hull' | 'trimesh'
+    // 🟢 新增：是否为触发器/传感器
+    isTrigger?: boolean
 
     // --- 新增：车身组件 ---
     // VehicleChassis 不需要太多参数，主要靠代码逻辑，但可以暴露悬挂参数

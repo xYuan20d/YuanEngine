@@ -66,7 +66,7 @@ export default class PlayerController extends Behaviour {
     }
     return null;
   }
-
+  
   onUpdate(dt) {
     // ... (保持不变)
     const controller = this.getCharacterController();
@@ -114,8 +114,12 @@ export default class PlayerController extends Behaviour {
       y: this.verticalVelocity * dt,
       z: movement.z
     };
-
-    controller.computeColliderMovement(collider, desiredMove);
+    
+    controller.computeColliderMovement(
+      collider, 
+      desiredMove, 
+      RAPIER.QueryFilterFlags.EXCLUDE_SENSORS // <--- 直接把这个数字传进去
+    );
     const correctedMove = controller.computedMovement();
 
     this.transform.position.x += correctedMove.x;

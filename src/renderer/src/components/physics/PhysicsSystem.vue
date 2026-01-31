@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, provide, shallowRef } from 'vue'
+import { inject, onMounted, onUnmounted, provide, shallowRef } from 'vue'
 import { useLoop } from '@tresjs/core'
 import RAPIER from '@dimforge/rapier3d-compat'
 import { Time, Input } from '../../engine/Engine'
+import * as THREE from 'three' // 🟢 2. 引入 THREE 用于类型检查
 
 const isReady = shallowRef(false)
 const world = shallowRef<RAPIER.World | null>(null)
@@ -12,6 +13,8 @@ let eventQueue: RAPIER.EventQueue | null = null
 const preStepCallbacks = new Set<() => void>()
 const registerPreStep = (cb: () => void) => preStepCallbacks.add(cb)
 const unregisterPreStep = (cb: () => void) => preStepCallbacks.delete(cb)
+
+const objectRegistry = inject<{ get: (id: string) => THREE.Object3D }>('scene-registry')
 
 // 碰撞体句柄 -> 节点 ID 的查找表
 const colliderMap = new Map<number, string>()
@@ -47,7 +50,10 @@ provide('collision-registry', {
 
 onMounted(async () => {
   try {
-    await RAPIER.init()
+    await RAPIER.init();
+
+    (window as any).RAPIER = RAPIER;
+
     const gravity = { x: 0.0, y: -9.81, z: 0.0 }
     world.value = new RAPIER.World(gravity)
     
@@ -84,33 +90,62 @@ onBeforeRender(({ delta, elapsed }) => {
   Time.deltaTime = delta
   Time.time = elapsed
 
-  // 必须确保 world, isReady 以及 eventQueue 都准备好了
   if (world.value && isReady.value && eventQueue) {
-    // 亚步进逻辑 (Sub-stepping)
     const substeps = 4;
     const subDt = 1 / (60 * substeps);
     world.value.timestep = subDt;
 
     for (let i = 0; i < substeps; i++) {
       preStepCallbacks.forEach(cb => cb())
-      
-      // 🟢 4. 修改：将 eventQueue 传入 step
-      // 只有传了它，Rapier 才会把碰撞事件写入队列
       world.value.step(eventQueue)
 
-      // 🟢 5. 新增：排空并处理事件 (Drain)
-      // 这个回调函数会为每一个发生的碰撞事件执行一次
+      // 🟢 4. 事件分发逻辑
       eventQueue.drainCollisionEvents((handle1, handle2, started) => {
         // A. 查表翻译 ID
-        const node1 = getNodeByCollider(handle1)
-        const node2 = getNodeByCollider(handle2)
+        const id1 = getNodeByCollider(handle1)
+        const id2 = getNodeByCollider(handle2)
+        
+        // 只有双方都是注册过的游戏物体才处理
+        if (!id1 || !id2) return
 
-        // B. 只有当双方都已注册（都是我们管理的 GameEntity）时才处理
-        if (node1 && node2) {
-          const type = started ? '🟢 Enter' : '🔴 Exit'
+        // B. 获取真正的 GameObject (Object3D)
+        // 这一步至关重要，因为脚本实例在 obj.userData.scripts 里
+        const obj1 = objectRegistry?.get(id1)
+        const obj2 = objectRegistry?.get(id2)
+
+        if (obj1 && obj2) {
           
-          // C. 打印日志验证 (下一步我们将把它替换为脚本调用)
-          console.log(`[Physics Event] ${type}: ${node1} <-> ${node2}`)
+          // C. 定义分发函数 (Helper)
+          const dispatch = (target: THREE.Object3D, other: THREE.Object3D) => {
+            // 检查该物体上有没有脚本
+            if (!target.userData.scripts || !Array.isArray(target.userData.scripts)) return
+
+            // 遍历所有脚本并调用回调
+            target.userData.scripts.forEach((script: any) => {
+              try {
+                if (started) {
+                  // 进入事件：优先调用 onTriggerEnter
+                  // (你也可以在这里判断 isSensor，如果不是 Sensor 则调用 onCollisionEnter)
+                  if (script.onTriggerEnter) script.onTriggerEnter(other)
+                  else if (script.onCollisionEnter) script.onCollisionEnter(other)
+                } else {
+                  // 离开事件
+                  if (script.onTriggerExit) script.onTriggerExit(other)
+                  else if (script.onCollisionExit) script.onCollisionExit(other)
+                }
+              } catch (e) {
+                console.error(`[Physics Error] Script callback failed on ${target.name}:`, e)
+              }
+            })
+          }
+
+          // D. 双向通知：A 撞了 B，B 也撞了 A
+          dispatch(obj1, obj2)
+          dispatch(obj2, obj1)
+          
+          // 调试日志 (可选保留)
+          // const type = started ? '🟢 Enter' : '🔴 Exit'
+          // console.log(`[Physics Event] ${type}: ${obj1.name} <-> ${obj2.name}`)
         }
       })
     }

@@ -127,7 +127,17 @@ const attachCollider = (targetBody: RAPIER_TYPE.RigidBody, isChild: boolean) => 
     colliderDesc.setRotation(relQuat)
   }
 
+  if (rbProps?.isTrigger) {
+    console.log(`[Physics] 👻 Set Sensor (Trigger): ${props.node.name} [${props.node.id}]`)
+    colliderDesc.setSensor(true)
+  }
+
   colliderDesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS)
+
+  colliderDesc.setActiveCollisionTypes(
+    RAPIER.ActiveCollisionTypes.DEFAULT | 
+    RAPIER.ActiveCollisionTypes.KINEMATIC_FIXED
+  )
 
   collider = worldRef.value.createCollider(colliderDesc, targetBody)
 
@@ -267,7 +277,7 @@ const initPhysics = () => {
     }
 
     if (type === 'kinematicPositionBased') {
-      characterController = world.createCharacterController(0.0)
+      characterController = world.createCharacterController(0.01)
       characterController.setMaxSlopeClimbAngle(45 * (Math.PI / 180))
       characterController.enableAutostep(0.3, 0.1, true)
       characterController.enableSnapToGround(0.2)

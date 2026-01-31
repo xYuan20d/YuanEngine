@@ -318,6 +318,13 @@ watch(() => props.node?.id, (newId) => {
         <div v-else-if="comp.type === 'RigidBody'" class="component-content">
 
           <div class="prop-row">
+            <div class="label" title="Is Trigger (Sensor)">Is Trigger</div>
+            <input type="checkbox" v-model="comp.props.isTrigger">
+          </div>
+          
+          <div style="height:1px; background:#eee; margin:5px 0;"></div>
+
+          <div class="prop-row">
             <div class="label" title="Collider Shape">Shape</div>
             <select v-model="comp.props.colliderType" class="simple-input">
               <option value="primitive">Primitive (极速/规则)</option>
