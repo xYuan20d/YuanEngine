@@ -3,7 +3,7 @@ import { inject, onUnmounted, watch, shallowRef } from 'vue'
 import { useLoop } from '@tresjs/core'
 import * as THREE from 'three'
 // 注意：这里导入只是为了类型定义，实际运行时用的是 window.Behaviour
-import { Behaviour } from '../engine/Engine' 
+import { Behaviour, ScriptManager } from '../engine/Engine' 
 
 const props = defineProps<{
   nodeId: string
@@ -17,6 +17,26 @@ const isPlaying = inject('is-playing', { value: false })
 
 const scriptInstance = shallowRef<Behaviour | null>(null)
 const { onBeforeRender } = useLoop()
+
+const flattenUserValues = (rawValues: Record<string, any>) => {
+  if (!rawValues) return {}
+  
+  const flattened: Record<string, any> = {}
+  
+  for (const key in rawValues) {
+    const item = rawValues[key]
+    
+    // 判断是否为新结构 (包含 type 和 value)
+    if (item && typeof item === 'object' && 'type' in item && 'value' in item) {
+      flattened[key] = item.value
+    } else {
+      // 兼容旧结构 (如果有些数据还没被 Inspector 转换过)
+      flattened[key] = item
+    }
+  }
+  
+  return flattened
+}
 
 // 🟢 辅助函数：等待物体注册成功 (最多等 3 秒)
 const waitForObject = async (id: string, maxAttempts = 30): Promise<THREE.Object3D | null> => {
@@ -70,6 +90,8 @@ const loadScript = async () => {
       const Input = window.Input;
       const Time = window.Time;
       const RAPIER = window.RAPIER;
+      const Global = window.Global;
+      const Wait = window.Wait;
     `;
     
     // sourceURL 使用短路径，方便在 DevTools 里辨识
@@ -115,16 +137,13 @@ const loadScript = async () => {
 
     // 注入 Inspector 面板的数据
     if (props.userValues) {
-      instance.inputs = { ...props.userValues }
+      instance.inputs = flattenUserValues(props.userValues)
     }
     
     // 调用 onStart
-    if (instance.onStart) {
-      try {
-        instance.onStart()
-      } catch (e) {
-        console.error(`[Script] Error in onStart (${props.scriptPath}):`, e)
-      }
+    const success = ScriptManager.tryStart(instance);
+    if (success) {
+      ScriptManager.checkPending();
     }
     
     scriptInstance.value = instance
@@ -149,7 +168,7 @@ watch(() => isPlaying.value, (playing) => {
 
 watch(() => props.userValues, (newVals) => {
   if (scriptInstance.value) {
-    Object.assign(scriptInstance.value.inputs, newVals)
+    Object.assign(scriptInstance.value.inputs, flattenUserValues(newVals))
   }
 }, { deep: true })
 

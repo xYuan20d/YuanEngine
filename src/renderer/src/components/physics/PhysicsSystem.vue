@@ -2,7 +2,7 @@
 import { inject, onMounted, onUnmounted, provide, shallowRef } from 'vue'
 import { useLoop } from '@tresjs/core'
 import RAPIER from '@dimforge/rapier3d-compat'
-import { Time, Input } from '../../engine/Engine'
+import { Time, Input, Global } from '../../engine/Engine'
 import * as THREE from 'three' // 🟢 2. 引入 THREE 用于类型检查
 
 const isReady = shallowRef(false)
@@ -76,6 +76,7 @@ onUnmounted(() => {
   colliderMap.clear()
   Input.unlockCursor()
   preStepCallbacks.clear()
+  Global.clear()
 })
 
 const { onBeforeRender } = useLoop()

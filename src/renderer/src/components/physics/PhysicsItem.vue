@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { useLoop } from '@tresjs/core'
 import { IGameNode } from '../../types/schema'
 import { calibrateWheel } from '../../utils/wheelUtils'
+import { flattenProps } from '../../utils/props' // 🟢 1. 引入解压工具
 import type RAPIER_TYPE from '@dimforge/rapier3d-compat'
 
 const props = defineProps<{
@@ -27,10 +28,8 @@ let collider: RAPIER_TYPE.Collider | null = null
 let characterController: RAPIER_TYPE.KinematicCharacterController | null = null
 let vehicleController: RAPIER_TYPE.DynamicRayCastVehicleController | null = null
 
-// 记录分离的轮子，方便销毁时还原
 const detachedWheels: { object: THREE.Object3D, originalParent: THREE.Object3D | null }[] = []
 
-// --- 辅助函数 ---
 const findMesh = (obj: THREE.Object3D): THREE.Mesh | null => {
   if (obj.type === 'Mesh') return obj as THREE.Mesh
   for (const child of obj.children) {
@@ -47,13 +46,17 @@ const attachCollider = (targetBody: RAPIER_TYPE.RigidBody, isChild: boolean) => 
   const isWheel = props.node.components.some(c => c.type === 'VehicleWheel')
   if (isWheel) return 
 
-  const meshProps = props.node.components.find(c => c.type === 'Mesh')?.props
-  const rbProps = props.node.components.find(c => c.type === 'RigidBody')?.props
+  // 🟢 2. 使用 flattenProps 解压属性
+  const rawMeshComp = props.node.components.find(c => c.type === 'Mesh')
+  const rawRbComp = props.node.components.find(c => c.type === 'RigidBody')
   
-  if (!meshProps) return
+  if (!rawMeshComp) return
+
+  const meshProps = flattenProps(rawMeshComp.props)
+  const rbProps = rawRbComp ? flattenProps(rawRbComp.props) : {}
 
   let colliderDesc: RAPIER_TYPE.ColliderDesc | null = null
-  const colliderType = rbProps?.colliderType || 'primitive'
+  const colliderType = rbProps.colliderType || 'primitive'
   
   const scale = new THREE.Vector3()
   props.object3d.updateWorldMatrix(true, false)
@@ -107,6 +110,7 @@ const attachCollider = (targetBody: RAPIER_TYPE.RigidBody, isChild: boolean) => 
   if (rbProps) {
     colliderDesc.setRestitution(rbProps.restitution ?? 0.5)
     colliderDesc.setFriction(rbProps.friction ?? 0.5)
+    // 只有非子节点才设置质量，否则 Rapier 会自动计算
     if (!isChild && rbProps.mass) {
        colliderDesc.setMass(rbProps.mass)
     }
@@ -127,13 +131,12 @@ const attachCollider = (targetBody: RAPIER_TYPE.RigidBody, isChild: boolean) => 
     colliderDesc.setRotation(relQuat)
   }
 
-  if (rbProps?.isTrigger) {
+  if (rbProps.isTrigger) {
     console.log(`[Physics] 👻 Set Sensor (Trigger): ${props.node.name} [${props.node.id}]`)
     colliderDesc.setSensor(true)
   }
 
   colliderDesc.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS)
-
   colliderDesc.setActiveCollisionTypes(
     RAPIER.ActiveCollisionTypes.DEFAULT | 
     RAPIER.ActiveCollisionTypes.KINEMATIC_FIXED
@@ -141,7 +144,6 @@ const attachCollider = (targetBody: RAPIER_TYPE.RigidBody, isChild: boolean) => 
 
   collider = worldRef.value.createCollider(colliderDesc, targetBody)
 
-  // 注册 ID 映射
   if (collider && registry) {
     registry.register(collider.handle, props.node.id)
   }
@@ -152,9 +154,11 @@ const setupVehicle = (body: RAPIER_TYPE.RigidBody) => {
   const chassisComp = props.node.components.find(c => c.type === 'VehicleChassis')
   if (!chassisComp || !worldRef?.value) return
 
+  // 🟢 3. 解压车辆底盘属性
+  const chassisProps = flattenProps(chassisComp.props)
   console.log(`[Physics] 🚗 Init Vehicle: ${props.node.name}`) 
 
-  const offset = chassisComp.props.centerOfMassOffset
+  const offset = chassisProps.centerOfMassOffset
   if (offset && (offset[0] !== 0 || offset[1] !== 0 || offset[2] !== 0)) {
      const bodyMass = body.mass()
      body.setAdditionalMassProperties(
@@ -168,7 +172,6 @@ const setupVehicle = (body: RAPIER_TYPE.RigidBody) => {
 
   vehicleController = worldRef.value.createVehicleController(body)
   const vehicleData = { controller: vehicleController, wheels: [] as any[] }
-  
   const worldRoot = props.object3d.parent || props.object3d
 
   props.node.children?.forEach((childNode) => {
@@ -189,10 +192,11 @@ const setupVehicle = (body: RAPIER_TYPE.RigidBody) => {
     if (!calibration) return
 
     const { radius, axle, direction, connectionPoint } = calibration
-    const config = wheelComp.props
+    
+    // 🟢 4. 解压轮子配置
+    const config = flattenProps(wheelComp.props)
     const finalRadius = radius * (config.radiusScale || 1.0)
 
-    // 分离轮子 (解决椭圆问题)
     const originalParent = wheelObject.parent
     if (originalParent) {
       worldRoot.attach(wheelObject) 
@@ -222,7 +226,6 @@ const setupVehicle = (body: RAPIER_TYPE.RigidBody) => {
       currentSteering: 0,
       connectionPoint: connectionPoint.clone(),
       direction: direction.clone(),
-      // 🟢 记录半径，用于视觉修正
       radius: finalRadius 
     })
   })
@@ -243,9 +246,11 @@ const initPhysics = () => {
   const world = worldRef?.value
   if (!world || !props.object3d) return
 
-  const rbProps = props.node.components.find(c => c.type === 'RigidBody')?.props
-
-  if (rbProps) {
+  const rawRbComp = props.node.components.find(c => c.type === 'RigidBody')
+  
+  if (rawRbComp) {
+    // 🟢 5. 解压刚体属性
+    const rbProps = flattenProps(rawRbComp.props)
     let bodyDesc: RAPIER_TYPE.RigidBodyDesc
     const type = rbProps.bodyType || 'dynamic'
     switch (type) {
@@ -312,8 +317,6 @@ const _chassisQuat = new THREE.Quaternion()
 const _wheelLocalPos = new THREE.Vector3()
 const _wheelLocalQuat = new THREE.Quaternion()
 
-// 🟢 定义一个视觉地面高度 (基于你的地面模型 Scale.Y=0.2 => 表面高度 0.1)
-// 如果你有更复杂的地形，这里需要用 Raycast 检测
 const VISUAL_GROUND_LEVEL = 0.1; 
 
 onBeforeRender(() => {
@@ -335,14 +338,12 @@ onBeforeRender(() => {
         const meta = wheelsMeta[i]
         if (!meta || !meta.object) continue
 
-        // A. 计算位置
         const connection = meta.connectionPoint
         const dir = meta.direction
         const suspensionLen = vehicleController.wheelSuspensionLength(i) || 0
 
         _wheelLocalPos.copy(connection).addScaledVector(dir, suspensionLen)
 
-        // B. 计算旋转
         const steeringAngle = (meta.currentSteering !== undefined) 
            ? meta.currentSteering 
            : (vehicleController.wheelSteering(i) || 0)
@@ -352,14 +353,10 @@ onBeforeRender(() => {
         const qRotate = new THREE.Quaternion().setFromAxisAngle(_tempAxisX, rotationAngle)
         _wheelLocalQuat.copy(qSteer).multiply(qRotate)
 
-        // C. 转世界坐标
         _tempPos.copy(_wheelLocalPos).applyQuaternion(_chassisQuat).add(_chassisPos)
         meta.object.position.copy(_tempPos)
         meta.object.quaternion.copy(_chassisQuat).multiply(_wheelLocalQuat)
 
-        // 🟢 核心修复：防止视觉穿模
-        // 如果轮子底部掉到了地面以下，强制把它提上来
-        // 这样会产生“悬挂还有行程”的视觉错觉，即便物理上已经触底了
         if (meta.radius) {
            const bottomY = meta.object.position.y - meta.radius
            if (bottomY < VISUAL_GROUND_LEVEL) {
@@ -391,11 +388,9 @@ onUnmounted(() => {
   if (preStepSystem) {
     preStepSystem.unregister(updateVehiclePhysics)
   }
-  
   detachedWheels.forEach(({ object, originalParent }) => {
     if (originalParent) originalParent.attach(object)
   })
-  
   if (vehicleController) {
     vehicleController.free()
     vehicleController = null
@@ -412,7 +407,6 @@ onUnmounted(() => {
     props.object3d.userData.characterController = null
     props.object3d.userData.vehicle = null
   }
-
   if (collider && registry) {
     registry.unregister(collider.handle)
   }

@@ -4,13 +4,14 @@ import { IGameNode } from '../types/schema'
 import * as THREE from 'three'
 import CameraGizmo from './CameraGizmo.vue' 
 import ScriptRunner from './ScriptRunner.vue'
-import PhysicsItem from './physics/PhysicsItem.vue' 
+import PhysicsItem from './physics/PhysicsItem.vue'
+import { flattenProps } from '../utils/props' // 🟢 引入解压工具
 
 defineOptions({ name: 'GameEntity' })
 
 const props = defineProps<{ node: IGameNode }>()
 
-// 场景注册表 (用于 CameraRig 等快速查找)
+// 场景注册表
 const registry = inject<{ 
   register: (id: string, obj: THREE.Object3D) => void,
   unregister: (id: string) => void
@@ -37,7 +38,7 @@ const onPhysicsCreated = (body: any) => {
   myBodyRef.value = body
 }
 
-// 注册 Three.js 对象到 Map 中
+// 注册 Three.js 对象
 watch(groupRef, (group) => {
   if (group && registry) registry.register(props.node.id, group)
 }, { immediate: true })
@@ -66,10 +67,24 @@ const scale = computed(() => [...props.node.scale])
         v-if="comp.type === 'Mesh'"
         :user-data="{ id: node.id }" 
       >
-        <TresBoxGeometry v-if="comp.props.geometry === 'Box'" :args="comp.props.args" />
-        <TresSphereGeometry v-else-if="comp.props.geometry === 'Sphere'" :args="comp.props.args" />
-        <TresPlaneGeometry v-else-if="comp.props.geometry === 'Plane'" :args="comp.props.args" />
-        <TresMeshStandardMaterial :color="comp.props.color" />
+        <TresBoxGeometry 
+          v-if="flattenProps(comp.props).geometry === 'Box'" 
+          :args="flattenProps(comp.props).args" 
+        />
+        <TresSphereGeometry 
+          v-else-if="flattenProps(comp.props).geometry === 'Sphere'" 
+          :args="flattenProps(comp.props).args" 
+        />
+        <TresPlaneGeometry 
+          v-else-if="flattenProps(comp.props).geometry === 'Plane'" 
+          :args="flattenProps(comp.props).args" 
+        />
+        <TresCylinderGeometry 
+          v-else-if="flattenProps(comp.props).geometry === 'Cylinder'" 
+          :args="flattenProps(comp.props).args" 
+        />
+        
+        <TresMeshStandardMaterial :color="flattenProps(comp.props).color" />
       </TresMesh>
 
       <ScriptRunner 
@@ -80,14 +95,15 @@ const scale = computed(() => [...props.node.scale])
         :component="comp"
       />
 
-      <TresPointLight v-if="comp.type === 'Light'" :intensity="comp.props.intensity" :color="comp.props.color" />
+      <TresPointLight 
+        v-if="comp.type === 'Light'" 
+        v-bind="flattenProps(comp.props)"
+      />
 
       <TresGroup v-if="comp.type === 'Camera'" name="Camera-Anchor-Dummy">
         <CameraGizmo 
-           :fov="comp.props.fov"
-           :near="comp.props.near"
-           :far="comp.props.far"
-           :color="comp.props.isMain ? '#42b883' : '#ffffff'"
+           v-bind="flattenProps(comp.props)"
+           :color="flattenProps(comp.props).isMain ? '#42b883' : '#ffffff'"
          />
       </TresGroup>
       

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, provide, onMounted } from 'vue'
+import { ref, computed, provide, onMounted, nextTick } from 'vue'
 import ContextMenu from './components/ui/ContextMenu.vue'
 import GameViewport from './components/GameViewport.vue'
 import HierarchyPanel from './components/HierarchyPanel.vue'
 import InspectorPanel from './components/InspectorPanel.vue'
 import { IGameNode } from './types/schema'
+import { Cloner } from './engine/Cloner' // 🟢 1. 引入 Cloner
 import * as THREE from 'three'
 
 // 辅助：从 JSON 数据递归计算某节点的世界矩阵
@@ -55,34 +56,36 @@ const moveNode = (nodeId: string, newParentId: string | null) => {
   const node = findNodeRecursive(sceneNodes.value, nodeId)
   if (!node) return
 
-  // 防止自己拖给自己，或者拖给自己的子孙（会导致死循环）
+  // 防止自己拖给自己，或者拖给自己的子孙
   if (nodeId === newParentId) return
-  // TODO: 还需要检查 newParentId 是否是 node 的子孙
+  
+  // 🟢 2. 检查当前移动的节点是否被选中
+  // 如果被选中了，先取消选中！这是解决“框不跟手”的关键
+  const wasSelected = currentSelection.value === nodeId
+  if (wasSelected) {
+    currentSelection.value = null
+  }
 
-  // 2. 计算节点当前的【世界变换】(在移动前)
+  // 3. 计算节点当前的【世界变换】(在移动前)
   const oldWorldMatrix = computeWorldMatrix(nodeId, sceneNodes.value)
 
-  // 3. 从旧父级中移除 (Data Operation)
-  deleteNodeRecursive(sceneNodes.value, nodeId) // 注意：这里需要稍微改造 deleteNode 仅移除引用不销毁
+  // 4. 从旧父级中移除
+  deleteNodeRecursive(sceneNodes.value, nodeId)
 
-  // 4. 计算新父级的【世界逆矩阵】
+  // 5. 计算新父级的【世界逆矩阵】
   const newParentInverse = new THREE.Matrix4()
   
   if (newParentId) {
-    // 如果有父级，计算父级的世界矩阵，然后求逆
     const parentWorldMatrix = computeWorldMatrix(newParentId, sceneNodes.value)
     newParentInverse.copy(parentWorldMatrix).invert()
-  } else {
-    // 如果拖到根目录，父级矩阵就是单位矩阵 (Identity)
-    // inverse 也是 Identity，不用动
   }
 
-  // 5. 【关键】计算新的局部矩阵
+  // 6. 计算新的局部矩阵
   // NewLocal = Inverse(NewParentWorld) * OldWorld
   const newLocalMatrix = new THREE.Matrix4()
   newLocalMatrix.multiplyMatrices(newParentInverse, oldWorldMatrix)
 
-  // 6. 分解矩阵，应用到节点数据
+  // 7. 分解矩阵，应用到节点数据
   const newPos = new THREE.Vector3()
   const newQuat = new THREE.Quaternion()
   const newScale = new THREE.Vector3()
@@ -90,12 +93,11 @@ const moveNode = (nodeId: string, newParentId: string | null) => {
   newLocalMatrix.decompose(newPos, newQuat, newScale)
 
   node.position = [newPos.x, newPos.y, newPos.z]
-  // 四元数转回欧拉角 (为了保持 Inspector 可读性)
   const newEuler = new THREE.Euler().setFromQuaternion(newQuat, 'XYZ')
   node.rotation = [newEuler.x, newEuler.y, newEuler.z]
   node.scale = [newScale.x, newScale.y, newScale.z]
 
-  // 7. 插入到新位置 (Data Operation)
+  // 8. 插入到新位置
   if (newParentId) {
     const newParent = findNodeRecursive(sceneNodes.value, newParentId)
     if (newParent) {
@@ -103,11 +105,18 @@ const moveNode = (nodeId: string, newParentId: string | null) => {
       newParent.children.push(node)
     }
   } else {
-    // 插入到根目录
     sceneNodes.value.push(node)
   }
   
   console.log(`[Engine] Moved ${node.name} to ${newParentId || 'Root'} (Auto-converted Transform)`)
+
+  // 🟢 9. 恢复选中状态
+  // 使用 nextTick 等待 Vue 完成组件的销毁和重建，Three.js 场景图更新完毕
+  if (wasSelected) {
+    nextTick(() => {
+      currentSelection.value = nodeId
+    })
+  }
 }
 
 const projectRoot = ref<string | null>(null) // 当前项目的根目录路径
@@ -326,9 +335,6 @@ const deleteNode = (id: string) => {
   }
 }
 
-// 提供编辑器动作给子组件
-provide('editor-actions', { addNode, deleteNode, moveNode })
-
 // 【新增】计算出当前选中的 Node 对象
 // 这样 InspectorPanel 就能直接拿到对象进行修改，利用 Vue 的引用特性实现双向绑定
 const selectedNode = computed(() => {
@@ -436,6 +442,59 @@ const stopResize = () => {
   document.body.style.userSelect = ''
   document.body.style.cursor = ''
 }
+
+// 粘贴板
+const internalClipboard = ref<IGameNode | null>(null)
+// --- 复制函数 ---
+const copyNode = (id: string) => {
+  const node = findNodeRecursive(sceneNodes.value, id)
+  if (node) {
+    // 存一个深拷贝的快照，防止源对象后续被修改影响粘贴结果
+    internalClipboard.value = JSON.parse(JSON.stringify(node))
+    console.log(`[Engine] Copied to clipboard: ${node.name}`)
+  }
+}
+
+// --- 粘贴函数 ---
+// targetParentId: 如果有值，粘贴为该节点的子节点；如果为 null，粘贴到根目录
+const pasteNode = (targetParentId: string | null) => {
+  if (!internalClipboard.value) {
+    console.warn('[Engine] Clipboard is empty')
+    return
+  }
+
+  // 1. 调用 Cloner 生成全新的节点 (ID重置，引用修复)
+  const newNode = Cloner.instantiate(internalClipboard.value)
+
+  // 2. (可选) 给名字加个后缀，方便区分
+  newNode.name = `${newNode.name} (Clone)`
+
+  // 3. 插入到场景树
+  if (targetParentId) {
+    const parent = findNodeRecursive(sceneNodes.value, targetParentId)
+    if (parent) {
+      if (!parent.children) parent.children = []
+      parent.children.push(newNode)
+    } else {
+      // 父节点没找到，回退到根目录
+      sceneNodes.value.push(newNode)
+    }
+  } else {
+    // 粘贴到根目录
+    sceneNodes.value.push(newNode)
+  }
+
+  console.log(`[Engine] Pasted ${newNode.name} to ${targetParentId || 'Root'}`)
+
+  // 4. 自动选中新粘贴的物体 (用户体验优化)
+  // 使用 nextTick 确保 DOM/Three.js 对象已生成
+  nextTick(() => {
+    currentSelection.value = newNode.id
+  })
+}
+
+// 提供编辑器动作给子组件
+provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode })
 </script>
 
 <template>

@@ -3,8 +3,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import * as THREE from 'three'
 import '@tresjs/core' 
-import { Behaviour, PropType, Input, Time } from './engine/Engine' // 🟢 引入 Input, Time
-import { useLoop } from '@tresjs/core'
+import { Behaviour, PropType, Input, Time, Global, Wait } from './engine/Engine' // 🟢 引入 Input, Time
 
 // 1. 初始化 Input 监听器
 Input._init();
@@ -15,6 +14,8 @@ Input._init();
 (window as any).PropType = PropType;
 (window as any).Input = Input; // 🟢 注入
 (window as any).Time = Time;   // 🟢 注入
+(window as any).Global = Global;
+(window as any).Wait = Wait;
 
 // 3. 全局循环处理 (更新 Time 和重置 Input)
 // 注意：useLoop 只能在 setup() 或组件上下文中使用。

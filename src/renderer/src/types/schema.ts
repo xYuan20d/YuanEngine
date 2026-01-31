@@ -2,6 +2,11 @@
 
 export type Vector3Array = [number, number, number]
 
+export interface ITypedValue {
+  type: string // 'number' | 'string' | 'boolean' | 'vector3' | 'node'
+  value: any
+}
+
 // 1. 组件数据定义
 // src/types/schema.ts
 
@@ -42,7 +47,7 @@ export interface IComponent {
     name?: string 
     // 存储用户在 Inspector 设置的值
     // 比如: { speed: 5.0, isActive: false }
-    userValues?: Record<string, any> 
+    userValues?: Record<string, ITypedValue | any>
     
     // 其他标准组件的 props...
     [key: string]: any 

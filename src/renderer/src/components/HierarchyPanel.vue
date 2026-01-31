@@ -18,52 +18,75 @@ const editorActions = inject<any>('editor-actions')
 
 // 右键菜单逻辑保持不变
 const handleContextMenu = (e: MouseEvent, node?: IGameNode) => {
-  const parentId = node?.id
+  // node 存在：右键点击了物体
+  // node 不存在：右键点击了空白处
+  const targetId = node?.id || null
 
-  const menuConfig = [
-    {
-      label: 'Create Object',
-      children: [
-        { 
-          label: 'Empty Object', 
-          icon: '⬜', 
-          action: () => editorActions.addNode('Empty', 'Empty', parentId) 
-        },
-        { separator: true },
-        {
-          label: '3D Mesh',
-          children: [
-            { label: 'Cube', action: () => editorActions.addNode('Mesh', 'Box', parentId) },
-            { label: 'Sphere', action: () => editorActions.addNode('Mesh', 'Sphere', parentId) },
-            { label: 'Plane', action: () => editorActions.addNode('Mesh', 'Plane', parentId) }
-          ]
-        },
-        { 
+  const menuConfig: any[] = []
+
+  // 🟢 1. 如果点击了节点，显示 "Copy"
+  if (node) {
+    menuConfig.push({
+      label: 'Copy',
+      icon: '📄',
+      action: () => editorActions.copyNode(node.id)
+    })
+  }
+
+  // 🟢 2. 无论点哪，都显示 "Paste" (具体的粘贴位置由 targetId 决定)
+  // 注意：这里其实可以优化，比如检查 clipboard 是否为空来决定是否禁用 Paste
+  // 但因为 clipboard 在 App.vue 里，这里简单处理，总是显示
+  menuConfig.push({
+    label: 'Paste',
+    icon: '📋',
+    action: () => editorActions.pasteNode(targetId)
+  })
+
+  // 分隔线
+  menuConfig.push({ separator: true })
+
+  // 🟢 3. 原有的 Create Object 菜单
+  menuConfig.push({
+    label: 'Create Object',
+    children: [
+      { 
+        label: 'Empty Object', 
+        icon: '⬜', 
+        action: () => editorActions.addNode('Empty', 'Empty', targetId) 
+      },
+      { separator: true },
+      {
+        label: '3D Mesh',
+        children: [
+          { label: 'Cube', action: () => editorActions.addNode('Mesh', 'Box', targetId) },
+          { label: 'Sphere', action: () => editorActions.addNode('Mesh', 'Sphere', targetId) },
+          { label: 'Plane', action: () => editorActions.addNode('Mesh', 'Plane', targetId) }
+        ]
+      },
+      { 
         label: 'Camera', 
         icon: '🎥', 
-        action: () => editorActions.addNode('Camera', 'Perspective', parentId) 
-        },
-        {
-          label: 'Light',
-          children: [
-            { label: 'Point Light', action: () => editorActions.addNode('Light', 'Point', parentId) },
-            { label: 'Directional Light', action: () => editorActions.addNode('Light', 'Directional', parentId) }
-          ]
-        }
-      ]
-    },
-    { separator: true },
-    { 
-      label: 'Delete', 
-      disabled: !node, 
-      action: () => {
-        if (node) {
-          // 调用注入的删除动作
-          editorActions.deleteNode(node.id)
-        }
+        action: () => editorActions.addNode('Camera', 'Perspective', targetId) 
+      },
+      {
+        label: 'Light',
+        children: [
+          { label: 'Point Light', action: () => editorActions.addNode('Light', 'Point', targetId) },
+          { label: 'Directional Light', action: () => editorActions.addNode('Light', 'Directional', targetId) }
+        ]
       }
-    }
-  ]
+    ]
+  })
+
+  // 🟢 4. 只有点击节点时才显示删除
+  if (node) {
+    menuConfig.push({ separator: true })
+    menuConfig.push({ 
+      label: 'Delete', 
+      icon: '🗑️',
+      action: () => editorActions.deleteNode(node.id)
+    })
+  }
 
   showContextMenu(e, menuConfig)
 }

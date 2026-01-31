@@ -2,6 +2,7 @@
 import { inject, shallowRef, watchEffect, ref, reactive } from 'vue'
 import { useLoop } from '@tresjs/core'
 import * as THREE from 'three'
+import { flattenProps } from '../utils/props' // 🟢 1. 引入解压工具
 
 // 1. 注入
 const registry = inject<{ get: (id: string) => THREE.Object3D | undefined }>('scene-registry')
@@ -9,7 +10,7 @@ const sceneData = inject('scene-data-ref') as any
 
 const cameraRef = shallowRef<THREE.PerspectiveCamera | null>(null)
 
-// 状态：ID 用来找物体，Props 用来设置参数
+// 状态
 const targetId = ref<string | null>(null)
 const targetObject = shallowRef<THREE.Object3D | null>(null)
 
@@ -22,11 +23,21 @@ const targetProps = reactive({
 
 // 2. 辅助函数：不仅找 ID，还把找到的相机组件 Props 返回出来
 const findMainCameraInfo = (nodes: any[]): { id: string, props: any } | null => {
+  if (!nodes) return null
+  
   for (const node of nodes) {
-    const camComp = node.components.find((c: any) => c.type === 'Camera' && c.props.isMain)
+    // 🟢 2. 这里必须解压！否则 { value: false } 也会被当成 true
+    const camComp = node.components.find((c: any) => {
+      if (c.type !== 'Camera') return false
+      const flat = flattenProps(c.props)
+      return flat.isMain === true
+    })
+
     if (camComp) {
-      return { id: node.id, props: camComp.props }
+      // 🟢 3. 返回解压后的 props
+      return { id: node.id, props: flattenProps(camComp.props) }
     }
+    
     if (node.children) {
       const found = findMainCameraInfo(node.children)
       if (found) return found
@@ -48,12 +59,12 @@ watchEffect(() => {
       targetObject.value = null // ID 变了，丢弃旧物体，重新寻找
     }
 
-    // B. 处理属性同步 (FOV, Near, Far)
-    // Vue 的响应式系统会自动处理这里，当 Inspector 修改 props 时，这里会立即执行
+    // B. 处理属性同步
+    // 🟢 4. info.props 现在已经是纯数字了，Three.js 不会崩了
     if (info.props) {
-      targetProps.fov = info.props.fov || 60
-      targetProps.near = info.props.near || 0.1
-      targetProps.far = info.props.far || 1000
+      targetProps.fov = info.props.fov ?? 60
+      targetProps.near = info.props.near ?? 0.1
+      targetProps.far = info.props.far ?? 1000
     }
   }
 })
@@ -83,13 +94,13 @@ onBeforeRender(() => {
   const target = targetObject.value
 
   // C. 同步矩阵 (位置 + 旋转)
-  target.updateMatrixWorld(true)
-  target.matrixWorld.decompose(dummyVec, dummyQuat, dummyScale)
+  if (target.matrixWorld) {
+    target.updateMatrixWorld(true)
+    target.matrixWorld.decompose(dummyVec, dummyQuat, dummyScale)
 
-  cameraRef.value.position.copy(dummyVec)
-  cameraRef.value.quaternion.copy(dummyQuat)
-  
-  // 注意：FOV/Near/Far 不需要在这里更新，Vue 的响应式 Props 会自动处理
+    cameraRef.value.position.copy(dummyVec)
+    cameraRef.value.quaternion.copy(dummyQuat)
+  }
 })
 </script>
 
