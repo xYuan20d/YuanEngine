@@ -16,15 +16,12 @@ const emit = defineEmits<{
 const { showContextMenu } = useContextMenu()
 const editorActions = inject<any>('editor-actions')
 
-// 右键菜单逻辑保持不变
+// 🟢 右键菜单 (保留宏功能)
 const handleContextMenu = (e: MouseEvent, node?: IGameNode) => {
-  // node 存在：右键点击了物体
-  // node 不存在：右键点击了空白处
   const targetId = node?.id || null
-
   const menuConfig: any[] = []
 
-  // 🟢 1. 如果点击了节点，显示 "Copy"
+  // 1. Copy
   if (node) {
     menuConfig.push({
       label: 'Copy',
@@ -33,19 +30,16 @@ const handleContextMenu = (e: MouseEvent, node?: IGameNode) => {
     })
   }
 
-  // 🟢 2. 无论点哪，都显示 "Paste" (具体的粘贴位置由 targetId 决定)
-  // 注意：这里其实可以优化，比如检查 clipboard 是否为空来决定是否禁用 Paste
-  // 但因为 clipboard 在 App.vue 里，这里简单处理，总是显示
+  // 2. Paste
   menuConfig.push({
     label: 'Paste',
     icon: '📋',
     action: () => editorActions.pasteNode(targetId)
   })
 
-  // 分隔线
   menuConfig.push({ separator: true })
 
-  // 🟢 3. 原有的 Create Object 菜单
+  // 3. Create Object
   menuConfig.push({
     label: 'Create Object',
     children: [
@@ -78,9 +72,14 @@ const handleContextMenu = (e: MouseEvent, node?: IGameNode) => {
     ]
   })
 
-  // 🟢 4. 只有点击节点时才显示删除
+  // 4. Delete & Save Macro
   if (node) {
     menuConfig.push({ separator: true })
+    menuConfig.push({
+      label: 'Save as Macro',
+      icon: '📦',
+      action: () => editorActions.createMacroFromNode(node.id)
+    })
     menuConfig.push({ 
       label: 'Delete', 
       icon: '🗑️',
@@ -91,23 +90,37 @@ const handleContextMenu = (e: MouseEvent, node?: IGameNode) => {
   showContextMenu(e, menuConfig)
 }
 
-// 空白区域拖拽处理
+// 🟢 修复后的 DragOver：不再严格检查，默认允许，防止回弹
 const onDragOver = (e: DragEvent) => {
-  e.preventDefault()
+  e.preventDefault() // 必须调用，否则 drop 不会触发
   
   if (e.dataTransfer) {
-    e.dataTransfer.dropEffect = 'move'
+    // 尝试识别类型以优化光标，但如果有问题，保底也是 move
+    const isAsset = e.dataTransfer.types.includes('asset/path')
+    
+    if (isAsset) {
+      e.dataTransfer.dropEffect = 'copy' // 宏是复制进来
+    } else {
+      e.dataTransfer.dropEffect = 'move' // 内部节点是移动
+    }
   }
 }
 
+// 🟢 Drop：在这里做严格处理
 const onDrop = (e: DragEvent) => {
-  if (e.dataTransfer) {
-    const draggedNodeId = e.dataTransfer.getData('node-id')
-    
-    if (draggedNodeId) {
-      // 拖拽到根目录
-      editorActions.moveNode(draggedNodeId, null)
-    }
+  if (!e.dataTransfer) return
+
+  // 尝试获取两种数据
+  const draggedNodeId = e.dataTransfer.getData('node-id')
+  const assetPath = e.dataTransfer.getData('asset/path')
+
+  // 情况 A: 内部节点移动 (拖到根目录)
+  if (draggedNodeId) {
+    editorActions.moveNode(draggedNodeId, null)
+  }
+  // 情况 B: 宏实例化 (拖到根目录)
+  else if (assetPath && assetPath.endsWith('.macro')) {
+    editorActions.instantiateMacro(assetPath, null)
   }
 }
 
@@ -145,6 +158,7 @@ const onEmptyAreaClick = () => {
 </template>
 
 <style scoped>
+/* 样式保持不变 */
 .panel-content { 
   display: flex; 
   flex-direction: column; 

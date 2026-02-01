@@ -121,6 +121,16 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('read-buffer', async (_event, filePath: string) => {
+    try {
+      // ⚠️ 关键：不传 'utf-8'，让它返回原始 Buffer
+      const buffer = await readFile(filePath) 
+      return { success: true, data: buffer }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
   // 🟢 2. 通用文件写入 [新增]
   // 用于保存宏、脚本、或其他通用文件
   ipcMain.handle('write-file', async (_event, { path, data }) => {
@@ -189,8 +199,13 @@ app.whenReady().then(() => {
 
     try {
       const scriptsDir = join(projectPath, 'scripts')
+      const assetsDir = join(projectPath, 'assets')
       if (!existsSync(scriptsDir)) {
         await mkdir(scriptsDir, { recursive: true })
+      }
+
+      if (!existsSync(assetsDir)) {
+        await mkdir(assetsDir, { recursive: true })
       }
 
       const projectFile = join(projectPath, 'project.json')

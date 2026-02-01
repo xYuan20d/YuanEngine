@@ -5,6 +5,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 const api = {
   // 原有的
   readFile: (path: string) => ipcRenderer.invoke('read-file', path),
+  readBuffer: (path: string) => ipcRenderer.invoke('read-buffer', path),
   saveProject: (path: string, data: string) => ipcRenderer.invoke('save-project-file', { path, data }),
   saveProjectAs: (data: string) => ipcRenderer.invoke('save-project-as', data),
   loadProject: (path: string) => ipcRenderer.invoke('load-project-file', path),

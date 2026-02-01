@@ -32,45 +32,38 @@ const onDragStart = (e: DragEvent) => {
   }
 }
 
-const onDrop = (e: DragEvent) => {
+// 🟢 核心修复 1: 宽松的 DragOver
+// 不要在这里检查 ID 或祖先关系，因为 dataTransfer 在此阶段不可读
+// 只要有东西拖进来，先允许 drop，否则浏览器会回弹
+const onDragOver = (e: DragEvent) => {
+  e.preventDefault() 
   if (e.dataTransfer) {
-    const draggedNodeId = e.dataTransfer.getData('node-id')
-    
-    // 防止自己拖给自己
-    if (draggedNodeId && draggedNodeId !== props.node.id) {
+    const isAsset = e.dataTransfer.types.includes('asset/path')
+    if (isAsset) {
+      e.dataTransfer.dropEffect = 'copy' // 宏文件 -> 复制
+    } else {
+      e.dataTransfer.dropEffect = 'move' // 内部节点 -> 移动
+    }
+  }
+}
+
+// 🟢 核心修复 2: 完整的 Drop 逻辑
+const onDrop = (e: DragEvent) => {
+  e.stopPropagation() // 🚨 关键：阻止冒泡！否则会同时触发根目录的 Drop，导致被丢到最外层
+  if (!e.dataTransfer) return
+
+  const draggedNodeId = e.dataTransfer.getData('node-id')
+  const assetPath = e.dataTransfer.getData('asset/path')
+
+  // 情况 A: 内部节点移动 (成为当前节点的子节点)
+  if (draggedNodeId) {
+    if (draggedNodeId !== props.node.id) {
       editorActions.moveNode(draggedNodeId, props.node.id)
     }
   }
-}
-
-// 检查节点是否是另一个节点的祖先（防止循环引用）
-const isAncestor = (parentId: string, childId: string): boolean => {
-  const checkChildren = (node: IGameNode, targetId: string): boolean => {
-    if (node.id === targetId) return true
-    if (node.children) {
-      for (const child of node.children) {
-        if (checkChildren(child, targetId)) return true
-      }
-    }
-    return false
-  }
-  
-  // 从当前节点开始查找
-  return checkChildren(props.node, childId)
-}
-
-const onDragover = (e: DragEvent) => {
-  e.preventDefault()
-  
-  if (e.dataTransfer) {
-    const draggedNodeId = e.dataTransfer.getData('node-id')
-    
-    // 检查是否可以拖拽到目标节点
-    if (draggedNodeId && draggedNodeId !== props.node.id && !isAncestor(props.node.id, draggedNodeId)) {
-      e.dataTransfer.dropEffect = 'move'
-    } else {
-      e.dataTransfer.dropEffect = 'none'
-    }
+  // 情况 B: 宏文件实例化 (成为当前节点的子节点)
+  else if (assetPath && assetPath.endsWith('.macro')) {
+    editorActions.instantiateMacro(assetPath, props.node.id)
   }
 }
 </script>
@@ -83,7 +76,7 @@ const onDragover = (e: DragEvent) => {
       :style="indentStyle"
       draggable="true"
       @dragstart.stop="onDragStart"
-      @dragover.prevent="onDragover"
+      @dragover.prevent="onDragOver"
       @drop.stop="onDrop"
       @click.stop="emit('select', node.id)"
       @contextmenu.stop="(e) => { 
@@ -91,8 +84,16 @@ const onDragover = (e: DragEvent) => {
         emit('contextmenu', e, node) 
       }"
     >
-      <span class="icon">{{ node.children && node.children.length > 0 ? '📂' : '📦' }}</span> 
-      <span class="label">{{ node.name }}</span>
+      <span class="icon">
+        {{ node.macro ? '📦' : (node.children && node.children.length > 0 ? '📂' : '🧊') }}
+      </span> 
+      
+      <span 
+        class="label" 
+        :class="{ 'is-macro': !!node.macro }"
+      >
+        {{ node.name }}
+      </span>
     </div>
 
     <div v-if="node.children && node.children.length > 0">
@@ -125,6 +126,18 @@ const onDragover = (e: DragEvent) => {
 .tree-item.active { background-color: #e6f7ff; color: #1890ff; font-weight: 500; }
 .tree-item[draggable="true"] { cursor: grab; }
 .tree-item[draggable="true"]:active { cursor: grabbing; }
-.icon { margin-right: 6px; font-size: 14px; opacity: 0.7; }
+
+.icon { margin-right: 6px; font-size: 14px; opacity: 0.8; }
 .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 宏样式 */
+.is-macro {
+  color: #8e44ad; 
+  font-weight: 600;
+}
+
+/* 选中时宏样式修正 */
+.tree-item.active .is-macro {
+  color: #fff;
+}
 </style>

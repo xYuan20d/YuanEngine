@@ -9,6 +9,99 @@ import { IGameNode } from './types/schema'
 import { Cloner } from './engine/Cloner'
 import { FileSystem } from './engine/FileSystem'
 import * as THREE from 'three'
+import SceneBreadcrumbs from './components/SceneBreadcrumbs.vue' // 🟢 新增
+import { SceneManager } from './engine/SceneManager' // 🟢 新增
+
+
+// --- 🟢 新增：创建宏 (Save as Macro) ---
+const createMacroFromNode = async (nodeId: string) => {
+  const node = findNodeRecursive(sceneNodes.value, nodeId)
+  if (!node) return
+  if (!projectRoot.value) {
+    alert('Please save the project first!')
+    return
+  }
+
+  const fileName = `${node.name}.macro`
+  const relativePath = `assets/${fileName}` 
+  
+  const macroData = JSON.parse(JSON.stringify(node))
+  delete macroData.macro 
+  
+  const assetsDir = await FileSystem.pathJoin(projectRoot.value, 'assets')
+  const exists = await window.fileSystem.exists(assetsDir)
+  if (!exists) {
+     await window.fileSystem.createDir(assetsDir)
+  }
+
+  const fullPath = await FileSystem.pathJoin(assetsDir, fileName)
+  
+  // 🟢 关键修改：用 [ ] 包裹 macroData
+  // 这样宏文件就变成了标准的 Scene Nodes 格式
+  const fileContent = JSON.stringify([macroData], null, 2)
+  
+  const res = await FileSystem.writeFile(fullPath, fileContent)
+  
+  if (res.success) {
+    console.log(`[Engine] Macro created: ${relativePath}`)
+    node.macro = { source: relativePath }
+    alert(`Macro saved to ${relativePath}`)
+  } else {
+    console.error('Failed to create macro:', res.error)
+    alert('Failed to save macro.')
+  }
+}
+
+const instantiateMacro = async (relativePath: string, parentId: string | null) => {
+  if (!projectRoot.value) return
+
+  const fullPath = await FileSystem.pathJoin(projectRoot.value, relativePath)
+  const res = await FileSystem.readFile(fullPath)
+  
+  if (!res.success || !res.data) {
+    console.error('Failed to read macro:', res.error)
+    return
+  }
+
+  try {
+    const rawData = JSON.parse(res.data)
+    
+    // 🟢 关键修改：标准化为数组
+    // 无论文件里是 {...} 还是 [{...}]，都变成 [{...}]
+    const nodesToInstantiate = Array.isArray(rawData) ? rawData : [rawData]
+    
+    // 遍历实例化每一个根节点 (通常宏里只有一个，但这样写更健壮)
+    for (const rawNode of nodesToInstantiate) {
+      
+      const instance = Cloner.instantiate(rawNode)
+      
+      // 注入宏标记
+      instance.macro = {
+        source: relativePath
+      }
+      
+      // 放入场景
+      if (parentId) {
+        const parent = findNodeRecursive(sceneNodes.value, parentId)
+        if (parent) {
+          if (!parent.children) parent.children = []
+          parent.children.push(instance)
+        }
+      } else {
+        sceneNodes.value.push(instance)
+      }
+      
+      console.log(`[Engine] Instantiated macro node: ${instance.name}`)
+      
+      nextTick(() => {
+        currentSelection.value = instance.id
+      })
+    }
+
+  } catch (e) {
+    console.error('Failed to instantiate macro:', e)
+  }
+}
 
 // 辅助：从 JSON 数据递归计算某节点的世界矩阵
 const computeWorldMatrix = (nodeId: string, allNodes: IGameNode[]): THREE.Matrix4 => {
@@ -145,26 +238,61 @@ const nodesMap = computed(() => {
 provide('nodes-map', nodesMap)
 
 onMounted(() => {
-  // 监听 Electron 菜单栏的保存请求
+  // 🟢 1. 初始化默认场景 (根场景)
+  // 如果没有 SceneManager 初始化，界面会是空的
+  // 这里的 null 表示当前还没保存过文件 (Untitled)
+  SceneManager.initRoot(demo, null)
+
+  // 🟢 2. 监听保存请求 (支持多场景上下文)
   window.fileSystem.onRequestSave(async () => {
+    // 获取当前激活的编辑器上下文 (可能是 Root，也可能是 Macro)
+    const ctx = SceneManager.activeContext.value
+    if (!ctx) return
+
+    // 序列化当前上下文的节点树
+    const data = JSON.stringify(ctx.nodes, null, 2)
+
+    // CASE A: 如果当前是在编辑“宏”
+    if (ctx.type === 'macro') {
+      if (ctx.filePath) {
+        const res = await FileSystem.writeFile(ctx.filePath, data)
+        if (res.success) {
+          console.log(`✅ Macro saved: ${ctx.name}`)
+          ctx.isDirty = false // 清除脏标记
+        } else {
+          console.error('Macro save failed:', res.error)
+        }
+      } else {
+        console.error('Macro context missing file path!')
+      }
+      return
+    }
+
+    // CASE B: 如果当前是在编辑“根场景” (Project)
+    // 逻辑和以前类似，但要判断是“覆盖保存”还是“另存为”
     
-    const data = JSON.stringify(sceneNodes.value, null, 2)
-    
-    // A. 覆盖保存
+    // B1. 覆盖保存
     if (projectRoot.value) {
       const res = await FileSystem.saveProject(projectRoot.value, data)
       if (res.success) {
         console.log('✅ Project saved!')
+        ctx.isDirty = false
       } else {
         console.error('Save failed:', res.error)
       }
     } 
-    // B. 另存为 (新建项目)
+    // B2. 另存为 (新建项目)
     else {
       const res = await FileSystem.saveProjectAs(data)
       
       if (res.success && res.data && res.data.path) {
+        // 更新全局状态
         projectRoot.value = res.data.path
+        
+        // 更新 SceneManager 根上下文的路径
+        ctx.filePath = res.data.path
+        ctx.isDirty = false
+
         document.title = `YuanEngine - ${res.data.path}`
         alert(`项目已创建于：${res.data.path}\n请将你的 JS 脚本放入该目录下的 scripts 文件夹中。`)
       } else if (res.error) {
@@ -173,11 +301,10 @@ onMounted(() => {
     }
   })
 
-  // 监听 Electron 菜单栏的打开项目
+  // 🟢 3. 监听打开项目
   window.fileSystem.onProjectOpened(async (path: string) => {
     console.log('📂 Opening project:', path)
     
-    // C. 加载项目 (解耦写法)
     try {
       const projectFile = await FileSystem.pathJoin(path, 'project.json')
       const res = await FileSystem.readFile(projectFile)
@@ -185,14 +312,19 @@ onMounted(() => {
       if (res.success && res.data) {
         // 反序列化
         const nodes = JSON.parse(res.data)
-        sceneNodes.value = nodes
-        projectRoot.value = path
         
+        // 🟢 使用 SceneManager 重置整个堆栈，加载新项目
+        SceneManager.initRoot(nodes, path)
+        
+        // 同步 App 内部状态
+        projectRoot.value = path
         currentSelection.value = null
         document.title = `YuanEngine - ${path}`
+        
       } else {
         if (confirm('该文件夹没有 project.json，是否初始化为新项目？')) {
-          sceneNodes.value = [] 
+          // 初始化为空项目
+          SceneManager.initRoot([], path)
           projectRoot.value = path
           document.title = `YuanEngine - ${path}`
         }
@@ -323,8 +455,7 @@ const selectedNode = computed(() => {
   return findNodeRecursive(sceneNodes.value, currentSelection.value)
 })
 
-// --- 数据部分 ---
-const sceneNodes = ref<IGameNode[]>([
+const demo: IGameNode[] = [
   {
     id: 'root_1',
     name: 'Player',
@@ -350,11 +481,15 @@ const sceneNodes = ref<IGameNode[]>([
       }
     ]
   }
-])
+]
+
+// --- 数据部分 ---
+const sceneNodes = SceneManager.currentNodes
 
 const currentSelection = ref<string | null>(null)
 const currentTool = ref<'translate' | 'rotate' | 'scale'>('translate')
 const isPlaying = ref(false)
+const showToolbar = ref(true)
 
 // 切换运行状态
 const togglePlay = () => {
@@ -477,7 +612,7 @@ const pasteNode = (targetParentId: string | null) => {
 }
 
 // 提供编辑器动作给子组件
-provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode })
+provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode, createMacroFromNode, instantiateMacro })
 </script>
 
 <template>
@@ -499,30 +634,42 @@ provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode }
 
         <div class="workspace">
           <div class="viewport-window">
-            <div class="floating-toolbar">
-               <div class="tool-btn-group">
-                  <button 
-                    :class="{ active: isPlaying, 'play-btn': true }"
-                    style="font-weight: bold; color: #42b883;"
-                    @click="togglePlay"
-                  >
-                    {{ isPlaying ? '⏹ Stop' : '▶ Play' }}
-                  </button>
-                  <div style="width: 1px; height: 16px; background: #ddd; margin: 0 8px;"></div>
-                  <button :class="{ active: currentTool === 'translate' }" @click="currentTool = 'translate'">Move</button>
-                  <button :class="{ active: currentTool === 'rotate' }" @click="currentTool = 'rotate'">Rotate</button>
-                  <button :class="{ active: currentTool === 'scale' }" @click="currentTool = 'scale'">Scale</button>
-               </div>
-            </div>
-
-            <GameViewport 
-              :scene-data="sceneNodes"
-              :selected-id="currentSelection"
-              :is-playing="isPlaying"
-              :tool-mode="currentTool"
-              @select="(id) => currentSelection = id"
-              @update:transform="handleUpdate"
+            
+            <SceneBreadcrumbs 
+              :tools-visible="showToolbar"
+              @toggle-tools="showToolbar = !showToolbar"
             />
+
+            <div class="viewport-content" style="position: relative; height: calc(100% - 30px);">
+               
+               <Transition name="toolbar-slide">
+                 <div class="floating-toolbar" v-show="showToolbar">
+                    <div class="tool-btn-group">
+                        <button 
+                          :class="{ active: isPlaying, 'play-btn': true }"
+                          style="font-weight: bold; color: #42b883;"
+                          @click="togglePlay"
+                        >
+                          {{ isPlaying ? '⏹ Stop' : '▶ Play' }}
+                        </button>
+                        <div style="width: 1px; height: 16px; background: #ddd; margin: 0 8px;"></div>
+                        <button :class="{ active: currentTool === 'translate' }" @click="currentTool = 'translate'">Move</button>
+                        <button :class="{ active: currentTool === 'rotate' }" @click="currentTool = 'rotate'">Rotate</button>
+                        <button :class="{ active: currentTool === 'scale' }" @click="currentTool = 'scale'">Scale</button>
+                     </div>
+                 </div>
+               </Transition>
+
+               <GameViewport 
+                 :key="SceneManager.activeContext.value?.id || 'empty'"
+                 :scene-data="sceneNodes"
+                 :selected-id="currentSelection"
+                 :is-playing="isPlaying"
+                 :tool-mode="currentTool"
+                 @select="(id) => currentSelection = id"
+                 @update:transform="handleUpdate"
+               />
+            </div>
           </div>
         </div>
 
@@ -676,5 +823,16 @@ provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode }
 .tool-btn-group .play-btn.active {
   background: rgba(66, 184, 131, 0.15);
   color: #42b883;
+}
+</style>
+
+<style>
+/* 全局样式文件，如 style.css 或 App.vue */
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;       /* 去除默认边距 */
+  padding: 0;
+  overflow: hidden; /* 关键：禁用 body 的滚动条 */
 }
 </style>

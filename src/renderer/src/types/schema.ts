@@ -70,4 +70,9 @@ export interface IGameNode {
 
   // 子节点 (递归)
   children?: IGameNode[]
+
+  // 🟢 新增：宏元数据
+  macro?: {
+    source: string  // 宏文件的相对路径 (e.g. "assets/Player.macro")
+  }
 }

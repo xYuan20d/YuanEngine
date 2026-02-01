@@ -11,9 +11,38 @@ interface LogEntry {
 const logs = ref<LogEntry[]>([])
 const containerRef = ref<HTMLElement | null>(null)
 
-// 模拟日志 (为了演示)
+// 🟢 1. 安全序列化函数 (核心修复)
+// 使用 WeakSet 来记录已遍历的对象，遇到循环引用时输出 "[Circular]"
+const safeStringify = (obj: any) => {
+  const seen = new WeakSet();
+  try {
+    return JSON.stringify(obj, (key, value) => {
+      // 只处理非空对象
+      if (typeof value === 'object' && value !== null) {
+        
+        // ⚡ 优化：针对 Three.js 对象 (Object3D) 只输出关键信息
+        // 防止几万行的数据把浏览器卡死
+        if (value.isObject3D) {
+           return `[Object3D: ${value.name || 'Unnamed'} (ID:${value.id}) type:${value.type}]`;
+        }
+        
+        // 检测循环引用
+        if (seen.has(value)) {
+          return '[Circular]';
+        }
+        seen.add(value);
+      }
+      return value;
+    }, 2); // 缩进 2 空格
+  } catch (e) {
+    return String(obj);
+  }
+}
+
+// 模拟日志
 const addLog = (type: LogEntry['type'], msg: any[]) => {
-  const message = msg.map(m => (typeof m === 'object' ? JSON.stringify(m) : String(m))).join(' ')
+  // 🟢 2. 使用 safeStringify 替代原来的 JSON.stringify
+  const message = msg.map(m => (typeof m === 'object' ? safeStringify(m) : String(m))).join(' ')
   const time = new Date().toLocaleTimeString()
   
   logs.value.push({ id: Date.now() + Math.random(), type, message, time })
@@ -26,14 +55,13 @@ const addLog = (type: LogEntry['type'], msg: any[]) => {
   })
 }
 
-// 拦截系统 console (可选，为了演示效果)
-// 真实项目中建议用专门的 Logger 类，这里简单 hook 一下
+// 拦截系统 console
 const originalLog = console.log
 const originalWarn = console.warn
 const originalError = console.error
 
 console.log = (...args) => { originalLog(...args); addLog('log', args) }
-// console.warn = (...args) => { originalWarn(...args); addLog('warn', args) }
+// console.warn = (...args) => { originalWarn(...args); addLog('warn', args) } // warn 可选开启
 console.error = (...args) => { originalError(...args); addLog('error', args) }
 
 const clearLogs = () => {

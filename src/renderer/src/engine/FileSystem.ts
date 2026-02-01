@@ -16,7 +16,8 @@ export interface FileEntry {
 // 2. 定义适配器接口 (Standard Interface)
 interface IFileSystemAdapter {
   // 基础 IO
-  readFile(path: string): Promise<FileResult<string>>
+  readFile(path: string): Promise<FileResult<string>>       // 读文本 (JSON, JS)
+  readBuffer(path: string): Promise<FileResult<ArrayBuffer>> // 🟢 新增：读二进制 (GLB, PNG)
   writeFile(path: string, content: string): Promise<FileResult<void>>
   readDir(path: string): Promise<FileResult<FileEntry[]>>
   exists(path: string): Promise<boolean>
@@ -49,6 +50,13 @@ class ElectronAdapter implements IFileSystemAdapter {
     const err = this.checkApi(); if (err) return err
     const res = await this.api.readFile(path)
     return { success: res.success, data: res.content, error: res.error }
+  }
+
+  async readBuffer(path: string) {
+    const err = this.checkApi(); if (err) return err
+    // 假设后端 IPC 返回的是 Uint8Array 或 Buffer
+    const res = await this.api.readBuffer(path) 
+    return { success: res.success, data: res.data, error: res.error }
   }
 
   async writeFile(path: string, content: string) {
@@ -124,6 +132,7 @@ class WebAdapter implements IFileSystemAdapter {
     console.warn('[WebFS] Mock read:', path)
     return { success: false, error: 'WebFS not implemented' }
   }
+  async readBuffer() { return { success: false, error: 'WebFS' } }
   async writeFile() { return { success: false, error: 'WebFS not implemented' } }
   async readDir() { return { success: false, error: 'WebFS not implemented' } }
   async exists() { return false }

@@ -12,6 +12,7 @@ export interface IFileSystemAPI {
   
   // 读取文件
   readFile: (path: string) => Promise<{ success: boolean, content: string, error?: string }>
+  readBuffer: (path: string) => Promise<{ success: boolean, data?: Uint8Array, error?: string }>
   
   // 🟢 [新增] 写入文件 (通用)
   writeFile: (path: string, data: string) => Promise<{ success: boolean, error?: string }>

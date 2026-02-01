@@ -2,6 +2,7 @@
 import { ref, inject, watch, computed, nextTick, onUnmounted } from 'vue'
 import { FileSystem, FileEntry } from '../engine/FileSystem'
 import { useContextMenu } from '../composables/useContextMenu'
+import { SceneManager } from '../engine/SceneManager' // 🟢 1. 引入 SceneManager
 
 // --- 基础状态 ---
 const projectRoot = inject('project-root') as any
@@ -248,10 +249,39 @@ const onDrop = async (e: DragEvent, targetFolder?: FileEntry) => {
 }
 
 // --- 交互逻辑 ---
-const onDoubleClick = (file: FileEntry) => {
+const onDoubleClick = async (file: FileEntry) => {
   if (file.isDirectory) {
     currentPath.value = getRelPath(file.name)
     clearSelection()
+  } 
+  else if (file.name.endsWith('.macro')) {
+    if (!projectRoot.value) return
+
+    const fullPath = await FileSystem.pathJoin(projectRoot.value, currentPath.value, file.name)
+    
+    // 打开宏，并传入“离开时的闭包”
+    await SceneManager.openMacro(file.name, fullPath, async (ctx) => {
+      
+      // 💾 自动保存逻辑
+      // 只有当数据变脏了 (isDirty) 才写盘，避免无效 IO
+      if (ctx.isDirty && ctx.filePath) {
+        console.log(`[AutoSave] Saving macro: ${ctx.name}`)
+        
+        // 序列化
+        const data = JSON.stringify(ctx.nodes, null, 2)
+        
+        // 写入
+        const res = await FileSystem.writeFile(ctx.filePath, data)
+        
+        if (res.success) {
+           // 可选：给个轻提示 toast
+           console.log('✅ Macro saved successfully')
+        } else {
+           alert('Failed to auto-save macro!')
+        }
+      }
+      
+    })
   }
 }
 
@@ -402,6 +432,9 @@ const navigateToBreadcrumb = (index: number) => {
         <div class="icon-wrapper">
           <svg v-if="file.isDirectory" class="folder-icon" viewBox="0 0 24 24" fill="#fbbf24" stroke="currentColor">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          <svg v-else-if="file.name.endsWith('.macro')" class="file-icon macro-icon" viewBox="0 0 24 24" fill="#e1bee7" stroke="#8e44ad">
+            <path d="M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A.991.991 0 0 1 3 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88v9zM12 4.15 6.04 7.5 12 10.85l5.96-3.35L12 4.15zM5 15.91l6 3.38v-6.71L5 9.21v6.7zm14 0v-6.7l-6 3.37v6.71l6-3.38z"/>
           </svg>
           <svg v-else class="file-icon" viewBox="0 0 24 24" fill="#f3f4f6" stroke="#9ca3af">
             <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
