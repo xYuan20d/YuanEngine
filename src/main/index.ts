@@ -1,8 +1,8 @@
 import { app, shell, BrowserWindow, ipcMain, Menu, dialog } from 'electron'
-import { join, resolve } from 'path'
+import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { readFile, writeFile, mkdir, readdir, stat, rm, rename, copyFile, access } from 'fs/promises'
 import { existsSync } from 'fs'
 
 function createMenu(mainWindow: BrowserWindow) {
@@ -15,11 +15,10 @@ function createMenu(mainWindow: BrowserWindow) {
           accelerator: 'CmdOrCtrl+O',
           click: async () => {
             const result = await dialog.showOpenDialog(mainWindow, {
-              properties: ['openDirectory'] // 只允许选文件夹
+              properties: ['openDirectory']
             })
             if (!result.canceled && result.filePaths.length > 0) {
               const projectPath = result.filePaths[0]
-              // 通知前端：项目打开了，把路径传过去
               mainWindow.webContents.send('project-opened', projectPath)
             }
           }
@@ -28,7 +27,6 @@ function createMenu(mainWindow: BrowserWindow) {
           label: 'Save Project',
           accelerator: 'CmdOrCtrl+S',
           click: () => {
-            // 通知前端：该交作业了（把数据发给我）
             mainWindow.webContents.send('request-save')
           }
         },
@@ -50,8 +48,6 @@ function createMenu(mainWindow: BrowserWindow) {
         { role: 'selectAll' }
       ]
     },
-
-    // 3. View 菜单 (方便调试)
     {
       label: 'View',
       submenu: [
@@ -66,11 +62,9 @@ function createMenu(mainWindow: BrowserWindow) {
         { role: 'togglefullscreen' }
       ]
     },
-    
-    // Window 菜单
-    { role: 'windowMenu' },
-    { role: 'viewMenu' }, // 方便调试，保留开发者工具
-    { role: 'windowMenu' }
+    { role: 'windowMenu' as const },
+    { role: 'viewMenu' as const },
+    { role: 'windowMenu' as const }
   ]
   // @ts-ignore
   const menu = Menu.buildFromTemplate(template)
@@ -78,7 +72,6 @@ function createMenu(mainWindow: BrowserWindow) {
 }
 
 function createWindow(): void {
-  // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
@@ -100,8 +93,6 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -109,25 +100,18 @@ function createWindow(): void {
   }
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
   createWindow()
-  // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
+  
+  const wins = BrowserWindow.getAllWindows()
+  if (wins.length > 0) createMenu(wins[0])
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
-
-  createMenu(BrowserWindow.getAllWindows()[0] as BrowserWindow)
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // 🟢 2. 注册 IPC：读取文件 (增强版，支持绝对和相对路径)
-  // 我们不再只读绝对路径，而是由前端传过来完整路径
+  // 🟢 1. 读取文件
   ipcMain.handle('read-file', async (_event, filePath: string) => {
     try {
       const content = await readFile(filePath, 'utf-8')
@@ -137,10 +121,47 @@ app.whenReady().then(() => {
     }
   })
 
-  // 🟢 3. 注册 IPC：保存项目文件
+  // 🟢 2. 通用文件写入 [新增]
+  // 用于保存宏、脚本、或其他通用文件
+  ipcMain.handle('write-file', async (_event, { path, data }) => {
+    try {
+      await writeFile(path, data, 'utf-8')
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 🟢 3. 读取目录结构 [新增]
+  // 用于资源管理器 (Asset Browser)
+  ipcMain.handle('read-dir', async (_event, dirPath: string) => {
+    try {
+      // 读取目录下的所有文件/文件夹名称
+      const files = await readdir(dirPath)
+      const entries: any[] = []
+      
+      // 遍历获取详细信息 (是否为文件夹)
+      for (const file of files) {
+        // 忽略隐藏文件 (以 . 开头)
+        if (file.startsWith('.')) continue
+        
+        const fullPath = join(dirPath, file)
+        const stats = await stat(fullPath)
+        entries.push({
+          name: file,
+          isDirectory: stats.isDirectory(),
+          path: fullPath
+        })
+      }
+      return { success: true, files: entries }
+    } catch (e: any) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  // 🟢 4. 保存项目 (内部专用)
   ipcMain.handle('save-project-file', async (_event, { path, data }) => {
     try {
-      // 在项目根目录下写入 project.json
       const target = join(path, 'project.json')
       await writeFile(target, data, 'utf-8')
       return { success: true }
@@ -149,42 +170,39 @@ app.whenReady().then(() => {
     }
   })
 
+  // 🟢 5. 项目另存为
   ipcMain.handle('save-project-as', async (_event, sceneJsonString: string) => {
-  const window = BrowserWindow.getFocusedWindow()
-  if (!window) return { success: false, error: 'No active window' }
+    const window = BrowserWindow.getFocusedWindow()
+    if (!window) return { success: false, error: 'No active window' }
 
-  // 1. 弹出文件夹选择框 (允许新建文件夹)
-  const result = await dialog.showOpenDialog(window, {
-    title: 'Select Folder to Save Project',
-    properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
-    buttonLabel: 'Create Project Here'
-  })
+    const result = await dialog.showOpenDialog(window, {
+      title: 'Select Folder to Save Project',
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
+      buttonLabel: 'Create Project Here'
+    })
 
-  if (result.canceled || result.filePaths.length === 0) {
-    return { success: false, canceled: true }
-  }
-
-  const projectPath = result.filePaths[0]
-
-  try {
-    // 2. 确保 scripts 文件夹存在 (自动创建基础结构)
-    const scriptsDir = join(projectPath, 'scripts')
-    if (!existsSync(scriptsDir)) {
-      await mkdir(scriptsDir, { recursive: true })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, canceled: true }
     }
 
-    // 3. 写入 project.json
-    const projectFile = join(projectPath, 'project.json')
-    await writeFile(projectFile, sceneJsonString, 'utf-8')
+    const projectPath = result.filePaths[0]
 
-    // 4. 返回成功的路径，让前端更新状态
-    return { success: true, path: projectPath }
-  } catch (error: any) {
-    return { success: false, error: error.message }
-  }
+    try {
+      const scriptsDir = join(projectPath, 'scripts')
+      if (!existsSync(scriptsDir)) {
+        await mkdir(scriptsDir, { recursive: true })
+      }
+
+      const projectFile = join(projectPath, 'project.json')
+      await writeFile(projectFile, sceneJsonString, 'utf-8')
+
+      return { success: true, path: projectPath }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
   })
   
-  // 🟢 4. 注册 IPC：读取项目文件 (打开项目时用)
+  // 🟢 6. 读取项目文件
   ipcMain.handle('load-project-file', async (_event, projectRoot) => {
     try {
       const target = join(projectRoot, 'project.json')
@@ -195,29 +213,69 @@ app.whenReady().then(() => {
     }
   })
   
-  // 🟢 5. 路径拼接工具 (解决 Windows/Mac 斜杠差异)
+  // 🟢 7. 路径拼接
   ipcMain.handle('path-join', (_event, ...args) => {
     return join(...args)
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+  // 🟢 [新增] 删除文件或文件夹 (递归删除)
+  ipcMain.handle('delete-path', async (_event, path: string) => {
+    try {
+      // recursive: true 允许删除非空文件夹, force: true 忽略不存在的文件
+      await rm(path, { recursive: true, force: true })
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 🟢 [新增] 重命名 / 移动
+  ipcMain.handle('rename-path', async (_event, { oldPath, newPath }) => {
+    try {
+      await rename(oldPath, newPath)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 🟢 [新增] 创建文件夹
+  ipcMain.handle('create-dir', async (_event, path: string) => {
+    try {
+      await mkdir(path, { recursive: true }) // recursive: true 允许创建嵌套目录 (a/b/c)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 🟢 [新增] 复制文件
+  ipcMain.handle('copy-file', async (_event, { src, dest }) => {
+    try {
+      await copyFile(src, dest)
+      return { success: true }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 🟢 [新增] 检查路径是否存在 (比 readFile 更高效)
+  ipcMain.handle('path-exists', async (_event, path: string) => {
+    try {
+      await access(path)
+      return true
+    } catch {
+      return false
+    }
+  })
 
   app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.

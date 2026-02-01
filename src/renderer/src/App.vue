@@ -4,8 +4,10 @@ import ContextMenu from './components/ui/ContextMenu.vue'
 import GameViewport from './components/GameViewport.vue'
 import HierarchyPanel from './components/HierarchyPanel.vue'
 import InspectorPanel from './components/InspectorPanel.vue'
+import BottomPanel from './components/BottomPanel.vue'
 import { IGameNode } from './types/schema'
-import { Cloner } from './engine/Cloner' // 🟢 1. 引入 Cloner
+import { Cloner } from './engine/Cloner'
+import { FileSystem } from './engine/FileSystem'
 import * as THREE from 'three'
 
 // 辅助：从 JSON 数据递归计算某节点的世界矩阵
@@ -59,7 +61,7 @@ const moveNode = (nodeId: string, newParentId: string | null) => {
   // 防止自己拖给自己，或者拖给自己的子孙
   if (nodeId === newParentId) return
   
-  // 🟢 2. 检查当前移动的节点是否被选中
+  // 2. 检查当前移动的节点是否被选中
   // 如果被选中了，先取消选中！这是解决“框不跟手”的关键
   const wasSelected = currentSelection.value === nodeId
   if (wasSelected) {
@@ -110,7 +112,7 @@ const moveNode = (nodeId: string, newParentId: string | null) => {
   
   console.log(`[Engine] Moved ${node.name} to ${newParentId || 'Root'} (Auto-converted Transform)`)
 
-  // 🟢 9. 恢复选中状态
+  // 9. 恢复选中状态
   // 使用 nextTick 等待 Vue 完成组件的销毁和重建，Three.js 场景图更新完毕
   if (wasSelected) {
     nextTick(() => {
@@ -139,76 +141,67 @@ const nodesMap = computed(() => {
   return map
 })
 
-// 🟢 2. 新增：注入给所有子组件使用
-// 这样 NodePicker.vue 里的 inject('nodes-map') 就能拿到数据了
+// 注入给所有子组件使用
 provide('nodes-map', nodesMap)
 
 onMounted(() => {
+  // 监听 Electron 菜单栏的保存请求
   window.fileSystem.onRequestSave(async () => {
     
-    // 序列化当前场景数据
     const data = JSON.stringify(sceneNodes.value, null, 2)
     
-    // 🔴 情况 A：已经有项目了 -> 直接覆盖保存
+    // A. 覆盖保存
     if (projectRoot.value) {
-      const res = await window.fileSystem.saveProject(projectRoot.value, data)
+      const res = await FileSystem.saveProject(projectRoot.value, data)
       if (res.success) {
         console.log('✅ Project saved!')
-        // 这里可以加个 toast 提示 "保存成功"
       } else {
         console.error('Save failed:', res.error)
       }
     } 
-    // 🟢 情况 B：还没有项目 (新建的) -> 触发“另存为”流程
+    // B. 另存为 (新建项目)
     else {
-      console.log('⚠️ No project root, triggering Save As...')
+      const res = await FileSystem.saveProjectAs(data)
       
-      const res = await window.fileSystem.saveProjectAs(data)
-      
-      if (res.success && res.path) {
-        // 保存成功后，直接“变成”打开状态
-        projectRoot.value = res.path
-        document.title = `YuanEngine - ${res.path}`
-        console.log('✅ New project created at:', res.path)
-        alert(`项目已创建于：${res.path}\n请将你的 JS 脚本放入该目录下的 scripts 文件夹中。`)
-      } else if (!res.canceled) {
+      if (res.success && res.data && res.data.path) {
+        projectRoot.value = res.data.path
+        document.title = `YuanEngine - ${res.data.path}`
+        alert(`项目已创建于：${res.data.path}\n请将你的 JS 脚本放入该目录下的 scripts 文件夹中。`)
+      } else if (res.error) {
         console.error('Save As failed:', res.error)
       }
     }
   })
 
-  // 2. 处理打开项目 (来自菜单栏 Cmd+O)
+  // 监听 Electron 菜单栏的打开项目
   window.fileSystem.onProjectOpened(async (path: string) => {
     console.log('📂 Opening project:', path)
     
-    // 读取 project.json
-    const res = await window.fileSystem.loadProject(path)
-    
-    if (res.success) {
-      try {
-        // 反序列化并替换当前场景
+    // C. 加载项目 (解耦写法)
+    try {
+      const projectFile = await FileSystem.pathJoin(path, 'project.json')
+      const res = await FileSystem.readFile(projectFile)
+      
+      if (res.success && res.data) {
+        // 反序列化
         const nodes = JSON.parse(res.data)
         sceneNodes.value = nodes
-        projectRoot.value = path // 设置根目录
+        projectRoot.value = path
         
-        // 重置选中状态
         currentSelection.value = null
         document.title = `YuanEngine - ${path}`
-      } catch (e) {
-        console.error('Invalid project.json', e)
+      } else {
+        if (confirm('该文件夹没有 project.json，是否初始化为新项目？')) {
+          sceneNodes.value = [] 
+          projectRoot.value = path
+          document.title = `YuanEngine - ${path}`
+        }
       }
-    } else {
-      // 如果没有 project.json，我们就认为这是一个新项目，初始化它
-      if (confirm('该文件夹没有项目文件，是否初始化为新项目？')) {
-        sceneNodes.value = [] // 或者默认场景
-        projectRoot.value = path
-        document.title = `YuanEngine - ${path}`
-      }
+    } catch (e) {
+      console.error('Failed to load project:', e)
     }
   })
 })
-
-
 
 // --- 查找节点函数 ---
 const findNodeRecursive = (nodes: IGameNode[], id: string): IGameNode | undefined => {
@@ -245,9 +238,9 @@ const hasMainCamera = (nodes: IGameNode[]): boolean => {
   return false
 }
 
-// --- 添加节点函数（升级版：支持指定父节点）---
+// --- 添加节点函数 ---
 const addNode = (type: 'Mesh' | 'Light' | 'Camera' | 'Empty', subtype: string, parentId?: string) => {
-  const id = 'node_' + Date.now()
+  const id = 'node_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 5)
   
   // 1. 基础结构
   const newNode: IGameNode = {
@@ -276,7 +269,6 @@ const addNode = (type: 'Mesh' | 'Light' | 'Camera' | 'Empty', subtype: string, p
     newNode.name = 'Camera'
   }
   else if (type === 'Mesh') {
-    // 🟢 修复：Mesh 分支只处理真正的模型，不再处理 Empty
     let defaultArgs = [1, 1, 1] 
 
     if (subtype === 'Sphere') {
@@ -285,9 +277,6 @@ const addNode = (type: 'Mesh' | 'Light' | 'Camera' | 'Empty', subtype: string, p
       defaultArgs = [2, 2] 
     }
     
-    // 只有非 Empty 才会加 Mesh 组件
-    // 如果你之前的菜单里有 "Mesh -> Empty"，现在那个选项会报错或者生成无 Mesh 的物体
-    // 建议把菜单里的 Empty 移到专门的 "Create Empty" 按钮去
     newNode.components.push({
       type: 'Mesh',
       props: { geometry: subtype, args: defaultArgs, color: '#ffffff' }
@@ -300,12 +289,10 @@ const addNode = (type: 'Mesh' | 'Light' | 'Camera' | 'Empty', subtype: string, p
     })
   } 
   else if (type === 'Empty') {
-    // 🟢 空对象分支：什么都不做，保持 components 为空
-    // 只是为了逻辑清晰，显式写出来
     newNode.name = 'Empty Object' 
   }
 
-  // 3. 插入到场景树 (保持不变)
+  // 3. 插入到场景树
   if (parentId) {
     const parent = findNodeRecursive(sceneNodes.value, parentId)
     if (parent) {
@@ -321,22 +308,16 @@ const addNode = (type: 'Mesh' | 'Light' | 'Camera' | 'Empty', subtype: string, p
 
 // --- 删除节点函数 ---
 const deleteNode = (id: string) => {
-  // 如果删除的是当前选中的节点，清空选中状态
   if (currentSelection.value === id) {
     currentSelection.value = null
   }
-  
-  // 递归删除节点
   const deleted = deleteNodeRecursive(sceneNodes.value, id)
   if (deleted) {
     console.log(`[Engine] Deleted node ${id}`)
-  } else {
-    console.warn(`[Engine] Node ${id} not found for deletion`)
   }
 }
 
-// 【新增】计算出当前选中的 Node 对象
-// 这样 InspectorPanel 就能直接拿到对象进行修改，利用 Vue 的引用特性实现双向绑定
+// 计算出当前选中的 Node 对象
 const selectedNode = computed(() => {
   if (!currentSelection.value) return null
   return findNodeRecursive(sceneNodes.value, currentSelection.value)
@@ -373,12 +354,11 @@ const sceneNodes = ref<IGameNode[]>([
 
 const currentSelection = ref<string | null>(null)
 const currentTool = ref<'translate' | 'rotate' | 'scale'>('translate')
-const isPlaying = ref(false) // [新增] 运行状态
+const isPlaying = ref(false)
 
 // 切换运行状态
 const togglePlay = () => {
   isPlaying.value = !isPlaying.value
-  // 切换时取消选中，避免 Gizmo 在运行时干扰
   if (isPlaying.value) {
     currentSelection.value = null
   }
@@ -394,43 +374,56 @@ const handleUpdate = (id: string, newTrans: any) => {
   }
 }
 
-// --- 核心：面板拖拽逻辑 ---
+// --- 核心：面板拖拽逻辑 (升级版) ---
 const leftWidth = ref(260)
 const rightWidth = ref(280)
-const isResizing = ref(false) // 用于在拖拽时给 body 加样式，防止选中文字
+const bottomHeight = ref(250) // 🟢 2. 新增底部高度
+const isResizing = ref(false)
 
 // 临时状态
 let startX = 0
-let startWidth = 0
-let activePanel: 'left' | 'right' | null = null
+let startY = 0 // 🟢 3. 新增 Y
+let startDimension = 0 // "Dimension" 代替 Width，兼容高宽
+let activePanel: 'left' | 'right' | 'bottom' | null = null
 
-const startResize = (panel: 'left' | 'right', e: MouseEvent) => {
+const startResize = (panel: 'left' | 'right' | 'bottom', e: MouseEvent) => {
   isResizing.value = true
   activePanel = panel
   startX = e.clientX
-  startWidth = panel === 'left' ? leftWidth.value : rightWidth.value
-  
+  startY = e.clientY // 记录 Y
+
+  // 记录初始尺寸
+  if (panel === 'left') startDimension = leftWidth.value
+  else if (panel === 'right') startDimension = rightWidth.value
+  else if (panel === 'bottom') startDimension = bottomHeight.value
+
   document.addEventListener('mousemove', onMouseMove)
   document.addEventListener('mouseup', stopResize)
-  // 防止 iframe (如果有) 捕获鼠标事件
+  
   document.body.style.userSelect = 'none'
-  document.body.style.cursor = 'col-resize'
+  // 🟢 4. 动态光标
+  document.body.style.cursor = panel === 'bottom' ? 'row-resize' : 'col-resize'
 }
 
 const onMouseMove = (e: MouseEvent) => {
   if (!activePanel) return
-  const dx = e.clientX - startX
-  
-  if (activePanel === 'left') {
-    // 左侧：往右拉变宽
-    const newW = startWidth + dx
-    if (newW > 150 && newW < 500) leftWidth.value = newW
-  } else {
-    // 右侧：往右拉变窄 (因为是从右边缘算起，或者是 flex 布局逻辑)
-    // 实际上我们在 flex 布局中，右侧面板在右边。
-    // 鼠标往左移 (dx 为负)，宽度应该增加。
-    const newW = startWidth - dx
-    if (newW > 200 && newW < 600) rightWidth.value = newW
+
+  if (activePanel === 'bottom') {
+    // 🟢 5. 底部逻辑：鼠标上移 (dy < 0) -> 高度增加
+    const dy = e.clientY - startY
+    const newH = startDimension - dy
+    if (newH > 100 && newH < 800) bottomHeight.value = newH
+  } 
+  else {
+    // 左右逻辑
+    const dx = e.clientX - startX
+    if (activePanel === 'left') {
+      const newW = startDimension + dx
+      if (newW > 150 && newW < 500) leftWidth.value = newW
+    } else {
+      const newW = startDimension - dx
+      if (newW > 200 && newW < 600) rightWidth.value = newW
+    }
   }
 }
 
@@ -449,45 +442,35 @@ const internalClipboard = ref<IGameNode | null>(null)
 const copyNode = (id: string) => {
   const node = findNodeRecursive(sceneNodes.value, id)
   if (node) {
-    // 存一个深拷贝的快照，防止源对象后续被修改影响粘贴结果
     internalClipboard.value = JSON.parse(JSON.stringify(node))
     console.log(`[Engine] Copied to clipboard: ${node.name}`)
   }
 }
 
 // --- 粘贴函数 ---
-// targetParentId: 如果有值，粘贴为该节点的子节点；如果为 null，粘贴到根目录
 const pasteNode = (targetParentId: string | null) => {
   if (!internalClipboard.value) {
     console.warn('[Engine] Clipboard is empty')
     return
   }
 
-  // 1. 调用 Cloner 生成全新的节点 (ID重置，引用修复)
   const newNode = Cloner.instantiate(internalClipboard.value)
-
-  // 2. (可选) 给名字加个后缀，方便区分
   newNode.name = `${newNode.name} (Clone)`
 
-  // 3. 插入到场景树
   if (targetParentId) {
     const parent = findNodeRecursive(sceneNodes.value, targetParentId)
     if (parent) {
       if (!parent.children) parent.children = []
       parent.children.push(newNode)
     } else {
-      // 父节点没找到，回退到根目录
       sceneNodes.value.push(newNode)
     }
   } else {
-    // 粘贴到根目录
     sceneNodes.value.push(newNode)
   }
 
   console.log(`[Engine] Pasted ${newNode.name} to ${targetParentId || 'Root'}`)
 
-  // 4. 自动选中新粘贴的物体 (用户体验优化)
-  // 使用 nextTick 确保 DOM/Three.js 对象已生成
   nextTick(() => {
     currentSelection.value = newNode.id
   })
@@ -499,60 +482,68 @@ provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode }
 
 <template>
   <div class="editor-shell">
-    <div class="main-layout">
-      
-      <div class="panel-wrapper" :style="{ width: leftWidth + 'px' }">
-        <HierarchyPanel 
-          :nodes="sceneNodes" 
-          :selected-id="currentSelection"
-          :is-playing="isPlaying"
-          @select="(id) => currentSelection = id"
-        />
-      </div>
-
-      <div class="resizer" @mousedown="(e) => startResize('left', e)"></div>
-
-      <div class="workspace">
-        <div class="viewport-window">
-          <div class="floating-toolbar">
-             <div class="tool-btn-group">
-                <button 
-                  :class="{ active: isPlaying, 'play-btn': true }"
-                  style="font-weight: bold; color: #42b883;"
-                  @click="togglePlay"
-                >
-                  {{ isPlaying ? '⏹ Stop' : '▶ Play' }}
-                </button>
-                <div style="width: 1px; height: 16px; background: #ddd; margin: 0 8px;"></div>
-                <button :class="{ active: currentTool === 'translate' }" @click="currentTool = 'translate'">Move</button>
-                <button :class="{ active: currentTool === 'rotate' }" @click="currentTool = 'rotate'">Rotate</button>
-                <button :class="{ active: currentTool === 'scale' }" @click="currentTool = 'scale'">Scale</button>
-             </div>
-          </div>
-
-          <GameViewport 
-            :scene-data="sceneNodes"
+    
+    <div class="top-section">
+      <div class="main-layout">
+        
+        <div class="panel-wrapper" :style="{ width: leftWidth + 'px' }">
+          <HierarchyPanel 
+            :nodes="sceneNodes" 
             :selected-id="currentSelection"
             :is-playing="isPlaying"
-            :tool-mode="currentTool"
             @select="(id) => currentSelection = id"
-            @update:transform="handleUpdate"
           />
         </div>
+
+        <div class="resizer col-resizer" @mousedown="(e) => startResize('left', e)"></div>
+
+        <div class="workspace">
+          <div class="viewport-window">
+            <div class="floating-toolbar">
+               <div class="tool-btn-group">
+                  <button 
+                    :class="{ active: isPlaying, 'play-btn': true }"
+                    style="font-weight: bold; color: #42b883;"
+                    @click="togglePlay"
+                  >
+                    {{ isPlaying ? '⏹ Stop' : '▶ Play' }}
+                  </button>
+                  <div style="width: 1px; height: 16px; background: #ddd; margin: 0 8px;"></div>
+                  <button :class="{ active: currentTool === 'translate' }" @click="currentTool = 'translate'">Move</button>
+                  <button :class="{ active: currentTool === 'rotate' }" @click="currentTool = 'rotate'">Rotate</button>
+                  <button :class="{ active: currentTool === 'scale' }" @click="currentTool = 'scale'">Scale</button>
+               </div>
+            </div>
+
+            <GameViewport 
+              :scene-data="sceneNodes"
+              :selected-id="currentSelection"
+              :is-playing="isPlaying"
+              :tool-mode="currentTool"
+              @select="(id) => currentSelection = id"
+              @update:transform="handleUpdate"
+            />
+          </div>
+        </div>
+
+        <div class="resizer col-resizer" @mousedown="(e) => startResize('right', e)"></div>
+
+        <div class="panel-wrapper" :style="{ width: rightWidth + 'px' }">
+          <InspectorPanel 
+            :node="selectedNode" 
+            :is-playing="isPlaying"
+          />
+        </div>
+
       </div>
+    </div>
 
-      <div class="resizer" @mousedown="(e) => startResize('right', e)"></div>
+    <div class="resizer row-resizer" @mousedown="(e) => startResize('bottom', e)"></div>
 
-      <div class="panel-wrapper" :style="{ width: rightWidth + 'px' }">
-        <InspectorPanel 
-          :node="selectedNode" 
-          :is-playing="isPlaying"
-        />
-      </div>
-
+    <div class="bottom-section" :style="{ height: bottomHeight + 'px' }">
+      <BottomPanel />
     </div>
     
-    <!-- ContextMenu 应该放在最外层 -->
     <ContextMenu />
   </div>
 </template>
@@ -567,11 +558,26 @@ provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode }
   overflow: hidden;
 }
 
+/* 🟢 上半部分 */
+.top-section {
+  flex: 1;
+  min-height: 0; /* 关键：防止 flex item 溢出 */
+  display: flex;
+  flex-direction: column;
+}
+
 .main-layout {
   display: flex; 
   flex: 1; 
   overflow: hidden;
-  /* 移除之前的 min-width，改用更灵活的控制 */
+}
+
+/* 🟢 下半部分 */
+.bottom-section {
+  background: #fff;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 面板容器 */
@@ -579,37 +585,38 @@ provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode }
   background: #fff;
   display: flex; 
   flex-direction: column;
-  flex-shrink: 0; /* 关键：禁止被 Flex 压缩 */
+  flex-shrink: 0;
 }
 
-/* 拖拽手柄 */
+/* 🟢 通用 Resizer */
 .resizer {
-  width: 4px; /* 实际可见宽度很细，但点击区域要大一点 */
   background: transparent;
-  cursor: col-resize;
   position: relative;
   z-index: 10;
   flex-shrink: 0;
   transition: background 0.2s;
 }
 
-/* 给个伪元素做视觉分割线，更精致 */
-.resizer::after {
-  content: ''; 
-  position: absolute; 
-  top: 0; 
-  bottom: 0; 
-  left: 0; 
-  width: 1px;
-  background: #e0e0e0;
-}
-
 .resizer:hover { 
   background: #42b883; 
 }
 
-.resizer:hover::after { 
-  background: transparent; 
+/* 🟢 列 Resizer (左右) */
+.col-resizer {
+  width: 4px; 
+  cursor: col-resize;
+}
+.col-resizer::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: #e0e0e0;
+}
+.col-resizer:hover::after { background: transparent; }
+
+/* 🟢 行 Resizer (上下) */
+.row-resizer {
+  height: 4px;
+  cursor: row-resize;
+  width: 100%;
+  border-top: 1px solid #e0e0e0;
 }
 
 .workspace {
@@ -620,15 +627,12 @@ provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode }
   display: flex;
 }
 
-/* 视口容器 */
 .viewport-window {
   width: 100%; 
   height: 100%;
   position: relative;
-  /* 稍微改一下，让视口完全撑满中间，不要圆角和阴影了，更像专业软件 */
 }
 
-/* 悬浮工具栏 (替代 Header) */
 .floating-toolbar {
   position: absolute; 
   top: 10px; 

@@ -4,6 +4,7 @@ import { IGameNode } from '../types/schema'
 import InspectorAddComponent from './InspectorAddComponent.vue'
 import NodePicker from './properties/NodePicker.vue'
 import { NativeSchemas } from '../engine/NativeSchemas'
+import { FileSystem } from '../engine/FileSystem'
 
 const props = defineProps<{
   node: IGameNode | null | undefined
@@ -80,40 +81,34 @@ const getComponentConfig = (comp: any) => {
 // 加载脚本 Schema
 const loadScriptSchema = async (comp: any) => {
   if (comp.type !== 'Script' || !comp.props.src) return;
-  // 如果已经有了，就不重复加载文件了
-  // (JIT 会负责每次渲染时的数据检查，所以这里只需要负责把 Schema 拿回来)
   if (scriptSchemas[comp.props.src]) return; 
 
   let fullPath = comp.props.src
-  // 简单处理路径 (Electron/Browser 兼容)
   if (projectRoot && projectRoot.value && !fullPath.includes(':') && !fullPath.startsWith('/')) {
     try {
-      if (window.fileSystem && window.fileSystem.pathJoin) {
-        fullPath = await window.fileSystem.pathJoin(projectRoot.value, fullPath)
-      } else {
-        fullPath = `${projectRoot.value}/${fullPath}`.replace(/\\/g, '/')
-      }
+      // 🟢 2. 使用 FileSystem.pathJoin
+      fullPath = await FileSystem.pathJoin(projectRoot.value, fullPath)
     } catch (e) {}
   }
 
   try {
-    const response = await window.fileSystem.readFile(fullPath)
+    // 🟢 3. 使用 FileSystem.readFile
+    const response = await FileSystem.readFile(fullPath)
+    
+    // 🟢 4. 检查 success
     if (!response.success) return
 
-    // 注入环境上下文，防止脚本因为找不到基类报错
     const codeHeader = `const Behaviour = window.Behaviour; const PropType = window.PropType; const THREE = window.THREE;`
-    const blob = new Blob([codeHeader + response.content], { type: 'application/javascript' })
+    
+    // 🟢 5. 使用 .data (注意判空)
+    const blob = new Blob([codeHeader + (response.data || '')], { type: 'application/javascript' })
     const blobUrl = URL.createObjectURL(blob)
     
-    // 动态导入获取 Schema
     const module = await import(/* @vite-ignore */ blobUrl)
     URL.revokeObjectURL(blobUrl)
 
     if (module.default && module.default.schema) {
-      // 存入缓存
       scriptSchemas[comp.props.src] = module.default.schema
-      // Vue 的响应式系统检测到 scriptSchemas 变化，会触发界面重新渲染
-      // 重新渲染会调用 getComponentConfig -> 触发 JIT 清洗 -> 界面正常显示
     }
   } catch (e) {
     console.error(`[Inspector] Failed to load script schema: ${fullPath}`, e)

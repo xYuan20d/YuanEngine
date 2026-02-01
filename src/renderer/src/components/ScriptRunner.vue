@@ -4,6 +4,7 @@ import { useLoop } from '@tresjs/core'
 import * as THREE from 'three'
 // 注意：这里导入只是为了类型定义，实际运行时用的是 window.Behaviour
 import { Behaviour, ScriptManager } from '../engine/Engine' 
+import { FileSystem } from '../engine/FileSystem'
 
 const props = defineProps<{
   nodeId: string
@@ -65,20 +66,21 @@ const loadScript = async () => {
       
       if (!isAbsolute) {
         // 调用主进程拼接路径 (解决 Windows/Mac 斜杠差异)
-        fullPath = await window.fileSystem.pathJoin(projectRoot.value, props.scriptPath)
+        fullPath = await FileSystem.pathJoin(projectRoot.value, props.scriptPath)
       }
     }
 
     console.log(`[Script] 🚀 Initializing: ${fullPath}`)
 
     // 🟢 2. 读取文件
-    const response = await window.fileSystem.readFile(fullPath)
+    const response = await FileSystem.readFile(fullPath)
     if (!response.success) {
+      // 注意：我们的 FileSystem 封装统一了 error 字段
       console.error(`[Script] ❌ Read error: ${response.error}`)
       return
     }
 
-    let scriptContent = response.content
+    let scriptContent = response.data
 
     // 🟢 3. 稳健注入：手动在代码头部加上变量声明
     // 确保脚本内可以直接使用 Behaviour, PropType, THREE 等

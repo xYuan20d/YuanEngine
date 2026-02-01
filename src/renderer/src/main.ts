@@ -4,6 +4,7 @@ import App from './App.vue'
 import * as THREE from 'three'
 import '@tresjs/core' 
 import { Behaviour, PropType, Input, Time, Global, Wait } from './engine/Engine' // 🟢 引入 Input, Time
+import Tres from '@tresjs/core'
 
 // 1. 初始化 Input 监听器
 Input._init();
@@ -25,6 +26,7 @@ Input._init();
 // 这里我们仅做静态注入。
 
 const app = createApp(App)
+app.use(Tres)
 app.mount('#app')
 
 console.log('[Engine] Global classes injected:', { Behaviour, Input, Time })
