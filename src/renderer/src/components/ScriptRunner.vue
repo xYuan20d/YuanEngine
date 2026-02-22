@@ -39,6 +39,20 @@ const flattenUserValues = (rawValues: Record<string, any>) => {
   return flattened
 }
 
+const destroyScript = () => {
+  if (scriptInstance.value) {
+    if (scriptInstance.value.onDestroy) {
+      try {
+        scriptInstance.value.onDestroy()
+        // console.log(`[ScriptRunner] 🗑️ Destroyed: ${props.scriptPath}`)
+      } catch (e) { 
+        console.error(`[ScriptRunner] 💥 Error in onDestroy:`, e) 
+      }
+    }
+    scriptInstance.value = null
+  }
+}
+
 // 🟢 辅助函数：等待物体注册成功 (最多等 3 秒)
 const waitForObject = async (id: string, maxAttempts = 30): Promise<THREE.Object3D | null> => {
   for (let i = 0; i < maxAttempts; i++) {
@@ -94,6 +108,9 @@ const loadScript = async () => {
       const RAPIER = window.RAPIER;
       const Global = window.Global;
       const Wait = window.Wait;
+      const UI = window.UI;
+      const Macro = window.Macro;
+      const Effect = window.Effect;
     `;
     
     // sourceURL 使用短路径，方便在 DevTools 里辨识
@@ -159,12 +176,8 @@ watch(() => isPlaying.value, (playing) => {
   if (playing) {
     loadScript()
   } else {
-    if (scriptInstance.value?.onDestroy) {
-      try {
-        scriptInstance.value.onDestroy()
-      } catch (e) { console.error(e) }
-    }
-    scriptInstance.value = null
+    // 停止播放时清理
+    destroyScript()
   }
 }, { immediate: true })
 
@@ -173,6 +186,10 @@ watch(() => props.userValues, (newVals) => {
     Object.assign(scriptInstance.value.inputs, flattenUserValues(newVals))
   }
 }, { deep: true })
+
+onUnmounted(() => {
+  destroyScript()
+})
 
 onBeforeRender(({ delta, elapsed }) => {
   // 如果组件被禁用 (active === false)，直接 return，不跑 Update

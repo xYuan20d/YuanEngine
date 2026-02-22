@@ -5,6 +5,7 @@ import InspectorAddComponent from './InspectorAddComponent.vue'
 import NodePicker from './properties/NodePicker.vue'
 import { NativeSchemas } from '../engine/NativeSchemas'
 import { FileSystem } from '../engine/FileSystem'
+import { useContextMenu } from '../composables/useContextMenu' // 🟢 1. 引入
 
 const props = defineProps<{
   node: IGameNode | null | undefined
@@ -13,6 +14,79 @@ const props = defineProps<{
 // 缓存脚本的 Schema: { 'path/to/script.js': { speed: ... } }
 const scriptSchemas = reactive<Record<string, any>>({}) 
 const projectRoot = inject('project-root') as any
+
+const { showContextMenu } = useContextMenu()
+
+const openTransformMenu = (e: MouseEvent) => {
+  if (!props.node) return
+  
+  showContextMenu(e, [
+    {
+      label: 'Reset Transform',
+      icon: '↺',
+      action: () => {
+        if (!props.node) return
+        props.node.position = [0, 0, 0]
+        props.node.rotation = [0, 0, 0]
+        props.node.scale = [1, 1, 1]
+      }
+    },
+    {
+      label: 'Copy World Position',
+      icon: '📋',
+      action: () => {
+        // 这里可以扩展复制逻辑
+        console.log('Copy pos:', props.node?.position)
+      }
+    }
+  ])
+}
+
+// 🟢 4. 普通组件菜单 (支持删除、移动)
+const openComponentMenu = (e: MouseEvent, index: number) => {
+  if (!props.node) return
+
+  const comps = props.node.components
+  const comp = comps[index]
+
+  showContextMenu(e, [
+    {
+      label: `Remove ${comp.type}`,
+      icon: '🗑️',
+      action: () => {
+        // 简单确认一下防止手滑
+        if (confirm(`Delete component "${comp.type}"?`)) {
+          comps.splice(index, 1) // ✂️ 核心删除逻辑
+        }
+      }
+    },
+    { separator: true },
+    {
+      label: 'Move Up',
+      icon: '⬆️',
+      disabled: index === 0, // 第一个不能上移
+      action: () => {
+        if (index > 0) {
+          const item = comps[index]
+          comps.splice(index, 1)
+          comps.splice(index - 1, 0, item)
+        }
+      }
+    },
+    {
+      label: 'Move Down',
+      icon: '⬇️',
+      disabled: index === comps.length - 1, // 最后一个不能下移
+      action: () => {
+        if (index < comps.length - 1) {
+          const item = comps[index]
+          comps.splice(index, 1)
+          comps.splice(index + 1, 0, item)
+        }
+      }
+    }
+  ])
+}
 
 // 🟢 核心函数 1: 数据清洗/升级 (Sanitizer)
 // 负责把 { mass: 1 } 变成 { mass: { type: 'number', value: 1 } }
@@ -139,6 +213,14 @@ watch(() => props.node?.components, (newComps) => {
         <div class="active-checkbox">
           <input type="checkbox" v-model="node.active" title="Active" />
         </div>
+        <div class="visible-checkbox" title="Visibility (Show/Hide)" style="margin-right: 8px;">
+          <span 
+            style="cursor: pointer; opacity: 0.7;" 
+            @click="node.visible = !node.visible"
+          >
+            {{ node.visible !== false ? '👁️' : '🕶️' }}
+          </span>
+        </div>
         <div class="name-input-wrapper">
           <span class="icon">📦</span>
           <input v-model="node.name" class="name-input" />
@@ -149,7 +231,9 @@ watch(() => props.node?.components, (newComps) => {
 
       <div class="component-box">
          <div class="component-header">
-          <span class="arrow">▼</span><span class="title">Transform</span><span class="menu">⋮</span>
+          <span class="arrow">▼</span>
+          <span class="title">Transform</span>
+          <span class="menu" @click.stop="openTransformMenu">⋮</span>
         </div>
         <div class="component-content">
            <div class="prop-row"><div class="label">Position</div><div class="vector3-inputs">
@@ -181,11 +265,10 @@ watch(() => props.node?.components, (newComps) => {
           <span v-if="comp.type === 'Script'" style="font-size:10px; color:#999; margin-left:10px;">
             {{ comp.props.src?.split('/').pop() || 'Empty' }}
           </span>
-          <span class="menu">⋮</span>
+          <span class="menu" @click.stop="(e) => openComponentMenu(e, idx)">⋮</span>
         </div>
 
         <div class="component-content">
-          
           <div v-if="comp.type === 'Script'" class="prop-row" style="margin-bottom: 8px;">
             <div class="label">Source</div>
             <input 
@@ -207,7 +290,6 @@ watch(() => props.node?.components, (newComps) => {
               <div class="label" :title="def.label || key">{{ def.label || key }}</div>
               
               <template v-if="getComponentConfig(comp).data[key]">
-                
                 <input 
                   v-if="def.type === 'number'" 
                   type="number" 
@@ -258,7 +340,6 @@ watch(() => props.node?.components, (newComps) => {
           <div v-else-if="comp.type === 'Script' && comp.props.src" style="color:#999; font-size:10px; text-align:center; padding:4px;">
             Loading or Parsing...
           </div>
-
         </div>
       </div>
 

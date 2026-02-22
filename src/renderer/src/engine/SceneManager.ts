@@ -26,9 +26,34 @@ const activeContext = computed(() => {
   return contextStack.value[contextStack.value.length - 1]
 })
 
-// 自动脏检查
-watch(() => activeContext.value?.nodes, (newVal) => {
+
+// --- 🟢 新增：运行时隔离状态 ---
+const isPlaying = ref(false)
+const runtimeNodes = ref<IGameNode[]>([]) // 专门供运行时挥霍的副本
+let backupDirtyState = false
+
+const enterPlayMode = () => {
+  if (!activeContext.value) return
+  isPlaying.value = true
+  // 1. 拍快照：深拷贝当前场景数据给运行时使用
+  runtimeNodes.value = JSON.parse(JSON.stringify(activeContext.value.nodes))
+  // 2. 记住当前的脏标记状态
+  backupDirtyState = activeContext.value.isDirty
+}
+
+const exitPlayMode = () => {
+  isPlaying.value = false
+  // 1. 销毁运行时副本，释放内存
+  runtimeNodes.value = [] 
+  // 2. 还原脏标记（防止切换模式引发误判保存）
   if (activeContext.value) {
+    activeContext.value.isDirty = backupDirtyState 
+  }
+}
+
+// 自动脏检查 (🟢 优化：仅在非运行状态下才标记脏)
+watch(() => activeContext.value?.nodes, (newVal) => {
+  if (activeContext.value && !isPlaying.value) {
     activeContext.value.isDirty = true
   }
 }, { deep: true })
@@ -177,17 +202,27 @@ const jumpToContext = async (index: number) => {
   contextStack.value.splice(index + 1)
 }
 
+// 🟢 核心修改：代理 currentNodes 实现编辑与运行态隔离
 const currentNodes = computed({
-  get: () => activeContext.value?.nodes || [],
-  set: (val) => { if (activeContext.value) activeContext.value.nodes = val }
+  get: () => isPlaying.value ? runtimeNodes.value : (activeContext.value?.nodes || []),
+  set: (val) => { 
+    if (isPlaying.value) {
+      runtimeNodes.value = val
+    } else if (activeContext.value) {
+      activeContext.value.nodes = val 
+    }
+  }
 })
 
 export const SceneManager = {
   stack: contextStack,
   activeContext,
   currentNodes,
+  isPlaying, // 暴露出状态，如果外部需要响应式读取
   initRoot,
   openMacro,
   closeActiveContext,
-  jumpToContext
+  jumpToContext,
+  enterPlayMode, // 🟢 暴露接口
+  exitPlayMode   // 🟢 暴露接口
 }

@@ -3,7 +3,7 @@
 export type Vector3Array = [number, number, number]
 
 export interface ITypedValue {
-  type: string // 'number' | 'string' | 'boolean' | 'vector3' | 'node'
+  type: string
   value: any
 }
 
@@ -11,7 +11,7 @@ export interface ITypedValue {
 // src/types/schema.ts
 
 export interface IComponent {
-  type: 'Mesh' | 'Light' | 'Camera' | 'Script' | 'RigidBody' | 'VehicleChassis' | 'VehicleWheel'
+  type: 'Mesh' | 'Light' | 'Camera' | 'Script' | 'RigidBody' | 'VehicleChassis' | 'VehicleWheel' | 'SkinnedMesh' | 'UIWidget'
   active?: boolean
   props: {
     // RigidBody 特有属性
@@ -48,6 +48,13 @@ export interface IComponent {
     // 存储用户在 Inspector 设置的值
     // 比如: { speed: 5.0, isActive: false }
     userValues?: Record<string, ITypedValue | any>
+
+    // 🟢 新增 SkinnedMesh 属性
+    defaultAnimation?: string
+    speed?: number
+
+    // 🟢 2. 新增 UI 组件属性
+    uiPath?: string
     
     // 其他标准组件的 props...
     [key: string]: any 
@@ -59,6 +66,7 @@ export interface IGameNode {
   id: string
   name: string
   active: boolean
+  visible: boolean
   
   // 变换属性
   position: Vector3Array

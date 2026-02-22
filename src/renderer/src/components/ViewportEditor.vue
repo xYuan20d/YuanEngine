@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { shallowRef, ref, watch, provide } from 'vue'
 import { TresCanvas } from '@tresjs/core'
-import { OrbitControls, TransformControls, Grid } from '@tresjs/cientos'
+import { OrbitControls, TransformControls, Grid, Environment } from '@tresjs/cientos'
 import * as THREE from 'three'
-import GameEntity from './GameEntity.vue'
+import SceneGraph from './SceneGraph.vue' 
 import SelectionBox from './SelectionBox.vue'
 import { IGameNode } from '../types/schema'
+import UIRenderer from './UIRenderer.vue'
+import CSM from './CSM.vue'
+
+// 🟢 引入官方后期处理组件
+import { EffectComposerPmndrs, BloomPmndrs, FXAAPmndrs } from '@tresjs/post-processing'
 
 const initialCameraPosition = [8, 5, 8] as const
 const initialLookAt = [0, 0, 0] as const
@@ -25,13 +30,13 @@ const emit = defineEmits<{
 }>()
 
 // --- 永远只有编辑器逻辑 ---
-provide('is-playing', { value: false }) // 强制告诉子组件：现在是编辑模式
+provide('is-playing', { value: false }) 
 
 const selectedObjectRef = shallowRef<THREE.Object3D | null>(null)
 const isGizmoDragging = ref(false)
 const orbitControlsRef = shallowRef(null)
 
-// 对象注册表 (用于选中逻辑)
+// 对象注册表
 const objectRegistry = new Map<string, THREE.Object3D>()
 const registerObject = (id: string, object: THREE.Object3D) => objectRegistry.set(id, object)
 const unregisterObject = (id: string) => objectRegistry.delete(id)
@@ -40,7 +45,7 @@ provide('scene-registry', {
   unregister: unregisterObject,
   get: getObject 
 })
-// 监听选中
+
 watch(() => props.selectedId, (newId) => {
   if (!newId) {
     selectedObjectRef.value = null
@@ -50,12 +55,13 @@ watch(() => props.selectedId, (newId) => {
   if (obj) selectedObjectRef.value = obj
 })
 
-// --- 交互逻辑 (点击、拖拽) ---
+// --- 交互逻辑 ---
 const onPointerMissed = () => {
   if (isGizmoDragging.value) return
   emit('select', null)
 }
 
+// 统一处理点击逻辑
 const onObjectClick = (e: any) => {
   if (isGizmoDragging.value) return
   e.stopPropagation()
@@ -81,35 +87,64 @@ const onDraggingChanged = (event: any) => {
     if (controls) controls.enabled = !event.value
   }
 }
+
+const glConfig = {
+  clearColor: '#fff', 
+  shadows: true,
+  alpha: false,
+  outputColorSpace: THREE.LinearSRGBColorSpace,
+  toneMapping: THREE.ACESFilmicToneMapping,
+  toneMappingExposure: 1.0
+}
+
+const effectProps = {
+  samples: 24
+}
 </script>
 
 <template>
-  <TresCanvas clear-color="#f0f2f5" @pointer-missed="onPointerMissed">
+  <TresCanvas v-bind="glConfig" @pointer-missed="onPointerMissed">
     <TresPerspectiveCamera 
       :position="initialCameraPosition" 
       :look-at="initialLookAt" 
       make-default 
     />
-    <OrbitControls ref="orbitControlsRef" make-default />
+    <OrbitControls ref="orbitControlsRef" :enable-damping="false" make-default />
     
-    <TresAmbientLight :intensity="0.7" />
-    <TresDirectionalLight :position="[10, 10, 10]" :intensity="1.2" />
+    <Suspense>
+      <EffectComposerPmndrs>
+        <BloomPmndrs
+          :intensity="1.5"
+          :luminance-threshold="1.0"
+          :luminance-smoothing="0.1"
+          mipmap-blur
+        />
+        <FXAAPmndrs v-bind="effectProps" />
+      </EffectComposerPmndrs>
+    </Suspense>
+
     <Grid :args="[1000, 1000]" :cell-size="1" :section-size="10" fade-distance="400" infinite-grid />
 
-    <GameEntity 
-      v-for="node in sceneData"
-      :key="node.id"
-      :node="node" 
-      @click="onObjectClick" 
+    <Suspense>
+      <Environment preset="city" :blur="0.6" /> 
+    </Suspense>
+
+    <CSM :cascades="4" :intensity="1.5" :shadow-bias="-0.0001">
+       <SceneGraph 
+         :nodes="sceneData" 
+         @node-click="onObjectClick" 
+       />
+    </CSM>
+    
+    <SelectionBox v-if="selectedObjectRef" :object="selectedObjectRef" />
+    <TransformControls 
+      v-if="selectedObjectRef" 
+      :object="selectedObjectRef" 
+      :mode="toolMode" 
+      @dragging-changed="onDraggingChanged" 
+      @mouse-up="onTransformChange" 
     />
 
-    <SelectionBox v-if="selectedObjectRef" :object="selectedObjectRef" />
-    <TransformControls
-      v-if="selectedObjectRef"
-      :object="selectedObjectRef"
-      :mode="toolMode"
-      @dragging-changed="onDraggingChanged" 
-      @mouse-up="onTransformChange"
-    />
   </TresCanvas>
+  <UIRenderer />
 </template>

@@ -11,6 +11,8 @@ interface LogEntry {
 const logs = ref<LogEntry[]>([])
 const containerRef = ref<HTMLElement | null>(null)
 
+let MAX_LOGS = 500 // 🟢 定义最大容量
+
 // 🟢 1. 安全序列化函数 (核心修复)
 // 使用 WeakSet 来记录已遍历的对象，遇到循环引用时输出 "[Circular]"
 const safeStringify = (obj: any) => {
@@ -41,11 +43,18 @@ const safeStringify = (obj: any) => {
 
 // 模拟日志
 const addLog = (type: LogEntry['type'], msg: any[]) => {
-  // 🟢 2. 使用 safeStringify 替代原来的 JSON.stringify
   const message = msg.map(m => (typeof m === 'object' ? safeStringify(m) : String(m))).join(' ')
   const time = new Date().toLocaleTimeString()
   
+  // 1. 添加新日志
   logs.value.push({ id: Date.now() + Math.random(), type, message, time })
+  
+  // 🟢 2. 内存保护：超过限制移除旧日志
+  // 保持数组长度在 MAX_LOGS 以内，就像贪吃蛇一样
+  if (logs.value.length > MAX_LOGS) {
+    // shift() 移除数组第一个元素（最旧的），这比 splice 更快一点
+    logs.value.shift()
+  }
   
   // 自动滚动到底部
   nextTick(() => {
@@ -56,13 +65,13 @@ const addLog = (type: LogEntry['type'], msg: any[]) => {
 }
 
 // 拦截系统 console
-const originalLog = console.log
-const originalWarn = console.warn
-const originalError = console.error
+// const originalLog = console.log
+// const originalWarn = console.warn
+// const originalError = console.error
 
-console.log = (...args) => { originalLog(...args); addLog('log', args) }
+// console.log = (...args) => { originalLog(...args); addLog('log', args) }
 // console.warn = (...args) => { originalWarn(...args); addLog('warn', args) } // warn 可选开启
-console.error = (...args) => { originalError(...args); addLog('error', args) }
+// console.error = (...args) => { originalError(...args); addLog('error', args) }
 
 const clearLogs = () => {
   logs.value = []

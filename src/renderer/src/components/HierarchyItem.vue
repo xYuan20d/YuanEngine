@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineProps, defineEmits, inject } from 'vue'
+import { defineProps, defineEmits, inject, ref, computed } from 'vue'
 import { IGameNode } from '../types/schema'
 
 // 1. 接收 props
@@ -18,12 +18,23 @@ const emit = defineEmits<{
 // 注入编辑器动作
 const editorActions = inject<any>('editor-actions')
 
-// 计算缩进样式
-const indentStyle = {
-  paddingLeft: `${(props.level || 0) * 20 + 10}px`
+// 🟢 新增：折叠状态控制
+// 默认展开 (true)，也可以根据层级 level > X 来默认折叠
+const isOpen = ref(true)
+
+const hasChildren = computed(() => props.node.children && props.node.children.length > 0)
+
+const toggleFold = () => {
+  isOpen.value = !isOpen.value
 }
 
-// 拖拽处理函数
+// 计算缩进样式
+// 🟢 修改：稍微调整基础缩进，给折叠箭头留出空间
+const indentStyle = computed(() => ({
+  paddingLeft: `${(props.level || 0) * 16 + 4}px`
+}))
+
+// --- 拖拽处理函数 (保持不变) ---
 const onDragStart = (e: DragEvent) => {
   if (e.dataTransfer) {
     // 记录被拖拽的节点 ID
@@ -32,38 +43,34 @@ const onDragStart = (e: DragEvent) => {
   }
 }
 
-// 🟢 核心修复 1: 宽松的 DragOver
-// 不要在这里检查 ID 或祖先关系，因为 dataTransfer 在此阶段不可读
-// 只要有东西拖进来，先允许 drop，否则浏览器会回弹
 const onDragOver = (e: DragEvent) => {
   e.preventDefault() 
   if (e.dataTransfer) {
     const isAsset = e.dataTransfer.types.includes('asset/path')
     if (isAsset) {
-      e.dataTransfer.dropEffect = 'copy' // 宏文件 -> 复制
+      e.dataTransfer.dropEffect = 'copy' // 宏/资源文件 -> 复制
     } else {
       e.dataTransfer.dropEffect = 'move' // 内部节点 -> 移动
     }
   }
 }
 
-// 🟢 核心修复 2: 完整的 Drop 逻辑
 const onDrop = (e: DragEvent) => {
-  e.stopPropagation() // 🚨 关键：阻止冒泡！否则会同时触发根目录的 Drop，导致被丢到最外层
+  e.stopPropagation()
   if (!e.dataTransfer) return
 
   const draggedNodeId = e.dataTransfer.getData('node-id')
   const assetPath = e.dataTransfer.getData('asset/path')
 
-  // 情况 A: 内部节点移动 (成为当前节点的子节点)
+  // 即使节点是折叠的，只要 Drop 到这个 Item 上，逻辑依然是“加入到该节点内部”
   if (draggedNodeId) {
-    if (draggedNodeId !== props.node.id) {
-      editorActions.moveNode(draggedNodeId, props.node.id)
-    }
-  }
-  // 情况 B: 宏文件实例化 (成为当前节点的子节点)
+     if (draggedNodeId !== props.node.id) editorActions.moveNode(draggedNodeId, props.node.id)
+  } 
   else if (assetPath && assetPath.endsWith('.macro')) {
     editorActions.instantiateMacro(assetPath, props.node.id)
+  }
+  else if (assetPath && (assetPath.endsWith('.glb') || assetPath.endsWith('.fbx'))) {
+    editorActions.addModelNode(assetPath, props.node.id)
   }
 }
 </script>
@@ -84,8 +91,17 @@ const onDrop = (e: DragEvent) => {
         emit('contextmenu', e, node) 
       }"
     >
+      <span 
+        class="fold-arrow" 
+        @click.stop="toggleFold"
+        @dblclick.stop
+        :style="{ opacity: hasChildren ? 1 : 0, cursor: hasChildren ? 'pointer' : 'default' }"
+      >
+        {{ isOpen ? '▼' : '▶' }}
+      </span>
+
       <span class="icon">
-        {{ node.macro ? '📦' : (node.children && node.children.length > 0 ? '📂' : '🧊') }}
+        {{ node.macro ? '📦' : (hasChildren ? '📂' : '🧊') }}
       </span> 
       
       <span 
@@ -96,7 +112,7 @@ const onDrop = (e: DragEvent) => {
       </span>
     </div>
 
-    <div v-if="node.children && node.children.length > 0">
+    <div v-show="isOpen && hasChildren">
       <HierarchyItem 
         v-for="child in node.children" 
         :key="child.id"
@@ -112,7 +128,8 @@ const onDrop = (e: DragEvent) => {
 
 <style scoped>
 .tree-item {
-  padding: 6px 10px; 
+  /* 🟢 修改：移除固定的 padding-left，由 style 动态控制 */
+  padding: 4px 10px 4px 0; 
   cursor: pointer; 
   font-size: 13px;
   color: #333; 
@@ -126,6 +143,20 @@ const onDrop = (e: DragEvent) => {
 .tree-item.active { background-color: #e6f7ff; color: #1890ff; font-weight: 500; }
 .tree-item[draggable="true"] { cursor: grab; }
 .tree-item[draggable="true"]:active { cursor: grabbing; }
+
+/* 🟢 新增：箭头样式 */
+.fold-arrow {
+  width: 20px; /* 固定宽度确保对齐 */
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #888;
+  flex-shrink: 0;
+  transition: color 0.2s;
+}
+.fold-arrow:hover { color: #333; background: rgba(0,0,0,0.05); border-radius: 4px; }
 
 .icon { margin-right: 6px; font-size: 14px; opacity: 0.8; }
 .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

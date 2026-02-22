@@ -1,10 +1,43 @@
 // src/engine/Engine.ts
 import * as THREE from 'three'
+import { useUIStore } from '../composables/useUIStore'
+import { SceneManager } from './SceneManager'
+import { FileSystem } from './FileSystem'
+import { Cloner } from './Cloner'
+import { ref } from 'vue'
 
 export enum PropType { Number = 'number', String = 'string', Boolean = 'boolean', Vector3 = 'vector3', Color = 'color', Asset = 'asset', Node = 'node' }
 export interface ScriptProperty { type: PropType, default: any, label?: string, min?: number, max?: number, step?: number }
+export const RuntimeRegistry = new Map<string, THREE.Object3D>();
 
-export const Wait = Symbol('Wait');
+export const Wait = Symbol('Wait');  // 挂起标识
+
+export class ProjectConfig {
+  /**
+   * 记录当前项目的根目录。
+   * 它在编辑器生命周期内是持久的，不受游戏 Play/Stop 影响。
+   */
+  public static rootPath: string | null = null;
+}
+
+export class UI {
+  /**
+   * 更新 UI 数据 (给 Vue 组件传参)
+   */
+  static update(nodeId: string, data: Record<string, any>) {
+    const { updateData } = useUIStore()
+    updateData(nodeId, data)
+  }
+
+  /**
+   * 🟢 显/隐控制 (系统级开关)
+   * 直接控制引擎层的渲染开关，无需在 Vue 组件里写 v-show
+   */
+  static setVisible(nodeId: string, visible: boolean) {
+     const { setVisible } = useUIStore()
+     setVisible(nodeId, visible) 
+  }
+}
 
 export class ScriptManager {
   private static _pendingScripts = new Set<any>();
@@ -75,17 +108,27 @@ export class ScriptManager {
 
 // 双重缓冲
 export class Input {
-  private static _keys = new Set<string>();
-  private static _mouseButtons = new Set<number>();
+  // 1. 持续状态 (Hold)
+  private static _keys = new Set<string>();      // 当前按住的键
+  private static _mouseButtons = new Set<number>(); // 当前按住的鼠标键
 
-  // --- 缓冲池 (Buffer) ---
-  // 这里存储浏览器异步发来的、还没被游戏处理的原始数据
+  // 2. 瞬时状态缓冲 (Buffer - 接收浏览器异步事件)
+  private static _downBuffer = new Set<string>(); // 这一帧按下的键
+  private static _upBuffer = new Set<string>();   // 这一帧松开的键
+  
+  private static _mouseDownBuffer = new Set<number>();
+  private static _mouseUpBuffer = new Set<number>();
+
+  // 3. 帧快照 (Frame Snapshot - 供脚本读取的稳定数据)
+  private static _frameDown = new Set<string>();
+  private static _frameUp = new Set<string>();
+  
+  private static _frameMouseDown = new Set<number>();
+  private static _frameMouseUp = new Set<number>();
+
+  // 鼠标移动缓冲
   private static _bufferMouseX = 0;
   private static _bufferMouseY = 0;
-
-  // --- 快照 (Snapshot) ---
-  // 这里存储当前这一帧锁定的数据，所有脚本读的都是这里
-  // 在这一帧内，无论读多少次，这个值都是不变的（稳如老狗）
   private static _frameMouseX = 0;
   private static _frameMouseY = 0;
 
@@ -93,61 +136,99 @@ export class Input {
     if ((window as any)._inputInited) return;
     (window as any)._inputInited = true;
 
-    // 键盘
-    window.addEventListener('keydown', (e) => this._keys.add(e.key.toLowerCase()));
-    window.addEventListener('keyup', (e) => this._keys.delete(e.key.toLowerCase()));
+    // --- 键盘事件 ---
+    window.addEventListener('keydown', (e) => {
+      const k = e.key.toLowerCase();
+      // 关键：防止长按时操作系统自动触发重复的 keydown
+      if (!this._keys.has(k)) {
+        this._downBuffer.add(k);
+      }
+      this._keys.add(k);
+    });
 
-    // 鼠标按键
-    window.addEventListener('mousedown', (e) => this._mouseButtons.add(e.button));
-    window.addEventListener('mouseup', (e) => this._mouseButtons.delete(e.button));
+    window.addEventListener('keyup', (e) => {
+      const k = e.key.toLowerCase();
+      this._keys.delete(k);
+      this._upBuffer.add(k);
+    });
 
-    // 鼠标移动：只负责往缓冲池里加水
+    // --- 鼠标按键事件 ---
+    window.addEventListener('mousedown', (e) => {
+      if (!this._mouseButtons.has(e.button)) {
+        this._mouseDownBuffer.add(e.button);
+      }
+      this._mouseButtons.add(e.button);
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      this._mouseButtons.delete(e.button);
+      this._mouseUpBuffer.add(e.button);
+    });
+
+    // --- 鼠标移动 ---
     window.addEventListener('mousemove', (e) => {
       this._bufferMouseX += e.movementX;
       this._bufferMouseY += e.movementY;
     });
   }
 
-  // 帧更新 (由 PhysicsSystem 在每帧最开始调用)
-  // 这就是“交换缓冲区”的操作
+  // 帧更新 (由 PhysicsSystem 调用)
   static update() {
-    // 1. 把缓冲池的数据“快照”下来
+    // 1. 处理鼠标移动 (现有逻辑)
     this._frameMouseX = this._bufferMouseX;
     this._frameMouseY = this._bufferMouseY;
-
-    // 2. 清空缓冲池，准备接收下一帧的输入
     this._bufferMouseX = 0;
     this._bufferMouseY = 0;
+
+    // 2. 处理瞬时按键 (新增逻辑)
+    // 将缓冲区的事件“快照”到当前帧，并清空缓冲区
+    
+    // 键盘
+    this._frameDown = new Set(this._downBuffer);
+    this._downBuffer.clear();
+    
+    this._frameUp = new Set(this._upBuffer);
+    this._upBuffer.clear();
+
+    // 鼠标
+    this._frameMouseDown = new Set(this._mouseDownBuffer);
+    this._mouseDownBuffer.clear();
+    
+    this._frameMouseUp = new Set(this._mouseUpBuffer);
+    this._mouseUpBuffer.clear();
   }
 
-  // --- 用户 API (只读快照) ---
+  // --- 用户 API ---
 
+  // 1. 持续按住 (移动用)
   static getKey(key: string): boolean {
     return this._keys.has(key.toLowerCase());
   }
 
-  static getMouseButton(button: number): boolean {
-    return this._mouseButtons.has(button);
+  // 2. 🟢 按下瞬间 (切换开关、跳跃、开火用) -> 只有一帧为 true
+  static getKeyDown(key: string): boolean {
+    return this._frameDown.has(key.toLowerCase());
   }
 
+  // 3. 🟢 松开瞬间
+  static getKeyUp(key: string): boolean {
+    return this._frameUp.has(key.toLowerCase());
+  }
+
+  // 鼠标 API
+  static getMouseButton(button: number): boolean { return this._mouseButtons.has(button); }
+  static getMouseButtonDown(button: number): boolean { return this._frameMouseDown.has(button); } // 新增
+  static getMouseButtonUp(button: number): boolean { return this._frameMouseUp.has(button); }     // 新增
+
   static getAxis(axis: 'Mouse X' | 'Mouse Y'): number {
-    // 返回快照数据
     if (axis === 'Mouse X') return this._frameMouseX;
     if (axis === 'Mouse Y') return this._frameMouseY;
     return 0;
   }
 
-  static lockCursor() {
-    document.body.requestPointerLock();
-  }
-
-  static unlockCursor() {
-    document.exitPointerLock();
-  }
-
-  static get isCursorLocked() {
-    return document.pointerLockElement !== null;
-  }
+  static lockCursor() { document.body.requestPointerLock(); }
+  static unlockCursor() { document.exitPointerLock(); }
+  static get isCursorLocked() { return document.pointerLockElement !== null; }
 }
 
 // Time 类
@@ -248,6 +329,185 @@ class EventBus {
   }
 }
 
+export class Macro {
+  static async instantiate(
+    macroPath: string, 
+    parentId: string | null = null, 
+    position?: THREE.Vector3 | {x:number, y:number, z:number}, 
+    rotation?: THREE.Euler | {x:number, y:number, z:number}
+  ): Promise<THREE.Object3D | null> {
+    
+    // ⬇️ 改用专用的 ProjectConfig 获取路径
+    if (!ProjectConfig.rootPath) {
+      console.error('[Macro] 无法实例化：项目根目录未配置 (ProjectConfig.rootPath is null)。');
+      return null;
+    }
+
+    const fullPath = await FileSystem.pathJoin(ProjectConfig.rootPath, macroPath);
+    const res = await FileSystem.readFile(fullPath);
+
+    if (!res.success || !res.data) {
+      console.error('[Macro] 宏读取失败:', res.error);
+      return null;
+    }
+
+    try {
+      const rawData = JSON.parse(res.data);
+      const nodesToInstantiate = Array.isArray(rawData) ? rawData : [rawData];
+      const newNodes: any[] = [];
+
+      // 拿到当前上下文的节点树 (直接修改 Vue 的响应式数据)
+      const sceneNodes = SceneManager.currentNodes.value; 
+
+      const findNodeRecursive = (nodes: any[], id: string): any => {
+        for (const node of nodes) {
+          if (node.id === id) return node;
+          if (node.children) {
+            const found = findNodeRecursive(node.children, id);
+            if (found) return found;
+          }
+        }
+      };
+
+      // 克隆并注入
+      for (const rawNode of nodesToInstantiate) {
+        const instance = Cloner.instantiate(rawNode);
+        instance.macro = { source: macroPath };
+
+        if (position) instance.position = [position.x, position.y, position.z];
+        if (rotation) {
+          const rx = (rotation as any)._x ?? rotation.x;
+          const ry = (rotation as any)._y ?? rotation.y;
+          const rz = (rotation as any)._z ?? rotation.z;
+          instance.rotation = [rx, ry, rz];
+        }
+
+        if (parentId) {
+          const parent = findNodeRecursive(sceneNodes, parentId);
+          if (parent) {
+            if (!parent.children) parent.children = [];
+            parent.children.push(instance);
+          } else {
+            sceneNodes.push(instance); 
+          }
+        } else {
+          sceneNodes.push(instance);
+        }
+        
+        newNodes.push(instance);
+      }
+
+      if (newNodes.length === 0) return null;
+
+      // ⏳ 等待 Vue 将数据转化为 Three.js 实体
+      const firstId = newNodes[0].id;
+      for (let i = 0; i < 50; i++) { 
+        const obj = RuntimeRegistry.get(firstId);
+        if (obj) return obj; 
+        await new Promise(r => setTimeout(r, 20)); 
+      }
+
+      console.warn(`[Macro] 实例已压入数据树，但等待 Three.js 挂载超时: ${firstId}`);
+      return null;
+
+    } catch (e) {
+      console.error('[Macro] 实例化解析错误:', e);
+      return null;
+    }
+  }
+
+  static destroy(id: string): boolean {
+    const sceneNodes = SceneManager.currentNodes.value;
+    
+    const deleteNodeRecursive = (nodes: any[], targetId: string): boolean => {
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].id === targetId) {
+          nodes.splice(i, 1); // 触发 Vue 响应式卸载
+          return true;
+        }
+        if (nodes[i].children) {
+          const deleted = deleteNodeRecursive(nodes[i].children, targetId);
+          if (deleted) return true;
+        }
+      }
+      return false;
+    };
+    
+    return deleteNodeRecursive(sceneNodes, id);
+  }
+}
+
+// 🟢 1. 定义 Outline 的配置参数
+export interface OutlineConfig {
+  color?: string;
+  edgeStrength?: number;
+  pulseSpeed?: number;
+  blur?: boolean;
+}
+
+// 🟢 2. 内部状态分组 (按配置参数的 JSON Hash 分组)
+interface OutlineGroup {
+  id: string; 
+  config: OutlineConfig;
+  nodeIds: Set<string>;
+}
+
+// 这个响应式变量专门供 Vue 渲染器读取
+export const activeOutlines = ref<OutlineGroup[]>([]);
+
+// 🟢 3. 暴露给脚本的 Effect 类
+export class Effect {
+  static Outline = {
+    /**
+     * 为指定物体添加描边特效
+     * @param nodeId 物体的 NodeID
+     * @param params 描边参数 (color, edgeStrength 等)
+     */
+    add(nodeId: string, params: OutlineConfig = {}) {
+      // 用配置参数的字符串作为唯一 Key，相同的颜色和粗细会自动合并到一个 Pass 里，节省性能
+      const configHash = JSON.stringify(params); 
+      
+      let group = activeOutlines.value.find(g => g.id === configHash);
+
+      if (!group) {
+        group = { id: configHash, config: params, nodeIds: new Set() };
+        activeOutlines.value.push(group);
+      }
+
+      group.nodeIds.add(nodeId);
+      
+      // 触发 Vue 的深度响应式更新
+      activeOutlines.value = [...activeOutlines.value]; 
+    },
+
+    /**
+     * 移除指定物体的描边
+     */
+    remove(nodeId: string) {
+      let updated = false;
+      
+      activeOutlines.value.forEach(group => {
+        if (group.nodeIds.has(nodeId)) {
+          group.nodeIds.delete(nodeId);
+          updated = true;
+        }
+      });
+
+      // 清理掉空的通道组
+      if (updated) {
+        activeOutlines.value = activeOutlines.value.filter(g => g.nodeIds.size > 0);
+      }
+    },
+
+    /**
+     * 清除所有描边 (通常在切换场景或退出 Play 模式时调用)
+     */
+    clear() {
+      activeOutlines.value = [];
+    }
+  }
+}
+
 // 基类
 export class Behaviour {
   public gameObject: THREE.Object3D;
@@ -283,13 +543,13 @@ export class Behaviour {
   onUpdate(dt: number, time: number): void {}
 
   onDestroy(): void {
-    // 1. 注销广播事件
+    // 注销广播事件
     this._registeredEvents.forEach(({ evt, cb }) => {
       EventBus.off(evt, cb);
     });
     this._registeredEvents = [];
 
-    // 🟢 2. 注销全局变量监听 (防止内存泄漏)
+    // 注销全局变量监听
     this._registeredWatches.forEach(({ key, cb }) => {
       Global._removeWatcher(key, cb);
     });
@@ -326,8 +586,116 @@ export class Behaviour {
       }
     }
   }
+
+  getAnimator() {
+    let animator: any = null;
+
+    // 1. 先检查自己 (gameObject) 是否直接挂载了 animator
+    if (this.gameObject.userData && this.gameObject.userData.animator) {
+      return this.gameObject.userData.animator;
+    }
+
+    // 2. 如果自己没有，就去子节点里找 (因为 SkinnedModel 是作为子节点挂载的)
+    this.gameObject.traverse((child) => {
+      if (animator) return; // 找到了就停
+      if (child.userData && child.userData.animator) {
+        animator = child.userData.animator;
+      }
+    });
+
+    return animator;
+  }
   
   getRigidBody() { return this.gameObject.userData.physicsBody; }
+
+  /**
+   * 动态修改父级 (Runtime)
+   * @param targetId 目标父节点 ID (传 null 回到场景根节点)
+   * @param keepWorldTransform 是否保持世界坐标不变 (true = 视觉上站在原地不动，false = 保持局部坐标，世界位置会突变)
+   * @param resetLocalPosition 是否强制归零局部坐标 (上车对齐时使用，通常此时 keepWorldTransform 为 false)
+   */
+  setParent(targetId: string | null, keepWorldTransform: boolean = true, resetLocalPosition: boolean = false): boolean {
+    
+    let targetParent: THREE.Object3D | null = null;
+    
+    if (targetId === null) {
+      targetParent = this.gameObject;
+      while (targetParent.parent) {
+        targetParent = targetParent.parent;
+      }
+    } else {
+      targetParent = RuntimeRegistry.get(targetId) || null;
+    }
+
+    if (!targetParent) {
+      console.error(`[setParent] ❌ 找不到目标节点: ${targetId}`);
+      return false;
+    }
+
+    if (keepWorldTransform) {
+      targetParent.attach(this.gameObject);
+    } else {
+      targetParent.add(this.gameObject);
+    }
+
+    if (resetLocalPosition) {
+      this.gameObject.position.set(0, 0, 0);
+      this.gameObject.rotation.set(0, 0, 0);
+    }
+
+    // 回写给vue的底层数据
+    if (this.gameObject.userData._node) {
+      const node = this.gameObject.userData._node;
+      node.position = [this.gameObject.position.x, this.gameObject.position.y, this.gameObject.position.z];
+      node.rotation = [this.gameObject.rotation.x, this.gameObject.rotation.y, this.gameObject.rotation.z];
+      node.scale = [this.gameObject.scale.x, this.gameObject.scale.y, this.gameObject.scale.z];
+    }
+
+    const rb = this.getRigidBody();
+    if (rb) {
+      
+    }
+
+    return true;
+  }
+  
+  // 🟢 3. 顺手加一个：查找物体 API
+  findObject(id: string): THREE.Object3D | undefined {
+    return RuntimeRegistry.get(id);
+  }
+  get active(): boolean {
+    // 优先读取 Vue 绑定的响应式数据
+    if (this.gameObject.userData && this.gameObject.userData._node) {
+      return this.gameObject.userData._node.active;
+    }
+    return this.gameObject.visible; // 降级处理
+  }
+
+  set active(value: boolean) {
+    // 修改 Vue 的响应式数据 -> 触发 v-if -> 销毁/创建组件
+    if (this.gameObject.userData && this.gameObject.userData._node) {
+      this.gameObject.userData._node.active = value;
+    } else {
+      this.gameObject.visible = value;
+    }
+  }
+
+  get visible(): boolean {
+    if (this.gameObject.userData && this.gameObject.userData._node) {
+      // 优先读 Vue 数据，保证响应式
+      return this.gameObject.userData._node.visible !== false;
+    }
+    return this.gameObject.visible;
+  }
+
+  set visible(value: boolean) {
+    // 同步修改 Vue 数据 -> 触发 TresJS 更新 -> 界面更新
+    if (this.gameObject.userData && this.gameObject.userData._node) {
+      this.gameObject.userData._node.visible = value;
+    } else {
+      this.gameObject.visible = value;
+    }
+  }
 
   onTriggerEnter(other: THREE.Object3D): void {}
   onTriggerExit(other: THREE.Object3D): void {}

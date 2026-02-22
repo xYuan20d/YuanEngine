@@ -27,6 +27,37 @@ export const NativeSchemas: Record<string, Record<string, SchemaDef>> = {
       type: PropType.Color, 
       default: '#ffffff', 
       label: 'Color' 
+    },
+    roughness: { 
+      type: PropType.Number, 
+      default: 0.5, 
+      min: 0, 
+      max: 1, 
+      step: 0.01, 
+      label: 'Roughness' // 粗糙度
+    },
+    metalness: { 
+      type: PropType.Number, 
+      default: 0.0, 
+      min: 0, 
+      max: 1, 
+      step: 0.01, 
+      label: 'Metalness' // 金属度
+    },
+
+    emissive: { 
+      type: PropType.Color, 
+      default: '#000000', 
+      label: 'Emissive' 
+    },
+    // 🟢 新增：发光强度 (允许拉很高，Bloom 需要超过 1.0 的亮度)
+    emissiveIntensity: { 
+      type: PropType.Number, 
+      default: 1.0, 
+      min: 0, 
+      max: 20, // 允许最大拉到 20 倍亮度
+      step: 0.1, 
+      label: 'Emissive Int' 
     }
     // 注意：args 在原版 Inspector 中未暴露给用户修改，所以这里暂时不加
   },
@@ -172,5 +203,51 @@ export const NativeSchemas: Record<string, Record<string, SchemaDef>> = {
     }
     // 注意：InspectorPanel.vue 的 Template 里没有 brakeForce，但 AddComponent 里可能有
     // 如果之前界面上没显示 brakeForce，这里加了后就会显示出来，算是功能增强
-  }
+  },
+
+  SkinnedMesh: {
+    src: {
+      type: PropType.String,
+      default: '',
+      label: 'File Path'
+    },
+    defaultAnimation: {
+      type: PropType.String,
+      default: '',
+      label: 'Auto Play'
+    },
+    speed: {
+      type: PropType.Number,
+      default: 1.0,
+      step: 0.1,
+      label: 'Speed'
+    }
+  },
+  UIWidget: {
+    uiPath: {
+      type: PropType.String, // 字符串输入框
+      default: '',
+      label: 'Vue File Path' // 显示标签
+    },
+    mode: {
+      type: PropType.String,
+      default: 'screen',
+      options: ['screen', 'world'],
+      label: 'Render Mode'
+    },
+    // 🟢 新增：世界空间下的缩放比例 (像素 -> 米)
+    // 例如 0.01 表示：100px 的 div 在 3D 世界里宽 1 米
+    resolution: {
+      type: PropType.Number,
+      default: 0.01,
+      step: 0.001,
+      label: 'Px to Unit' // 仅 World 模式生效
+    },
+    // 🟢 新增：是否开启遮挡剔除
+    occlude: {
+      type: PropType.Boolean,
+      default: true,
+      label: 'Occlusion' // 墙后隐藏
+    }
+  },
 }

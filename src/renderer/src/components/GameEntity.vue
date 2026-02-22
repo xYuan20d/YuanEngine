@@ -6,8 +6,18 @@ import CameraGizmo from './CameraGizmo.vue'
 import ScriptRunner from './ScriptRunner.vue'
 import PhysicsItem from './physics/PhysicsItem.vue'
 import { flattenProps } from '../utils/props' // 🟢 引入解压工具
+import ModelRenderer from './ModelRenderer.vue' // 🟢 1. 引入组件
+import SkinnedModel from './SkinnedModel.vue'
+import UIWidget from './UIWidget.vue' // 🟢 引入组件
 
 defineOptions({ name: 'GameEntity' })
+
+const csmSetupMaterial = inject<(mat: THREE.Material) => void>('csm-setup-material', () => {})
+
+const onMaterialCreated = (mat: any) => {
+  // 只要材质一创建，就告诉 CSM 管理器
+  csmSetupMaterial(mat)
+}
 
 const props = defineProps<{ node: IGameNode }>()
 
@@ -40,7 +50,12 @@ const onPhysicsCreated = (body: any) => {
 
 // 注册 Three.js 对象
 watch(groupRef, (group) => {
-  if (group && registry) registry.register(props.node.id, group)
+  if (group && registry) {
+    registry.register(props.node.id, group)
+  } else if (!group && registry) {
+    // 如果 group 没了（被 v-if 移除），必须注销，否则 RuntimeRegistry 里会有死对象
+    registry.unregister(props.node.id)
+  }
 }, { immediate: true })
 
 onUnmounted(() => {
@@ -54,18 +69,24 @@ const scale = computed(() => [...props.node.scale])
 
 <template>
   <TresGroup
+    v-if="node.active"
+    :visible="node.visible !== false"
     ref="groupRef"
     :position="position" 
     :rotation="rotation" 
     :scale="scale"
     :name="node.name"
-    :user-data="{ id: node.id }" 
+    :user-data="{ 
+      id: node.id,
+      _node: node 
+    }" 
   >
     <template v-for="(comp, index) in node.components" :key="index">
       
       <TresMesh 
         v-if="comp.type === 'Mesh'"
         :user-data="{ id: node.id }" 
+        cast-shadow    receive-shadow
       >
         <TresBoxGeometry 
           v-if="flattenProps(comp.props).geometry === 'Box'" 
@@ -84,8 +105,33 @@ const scale = computed(() => [...props.node.scale])
           :args="flattenProps(comp.props).args" 
         />
         
-        <TresMeshStandardMaterial :color="flattenProps(comp.props).color" />
+        <TresMeshStandardMaterial 
+          :color="flattenProps(comp.props).color" 
+          :roughness="flattenProps(comp.props).roughness ?? 0.5"
+          :metalness="flattenProps(comp.props).metalness ?? 0.0"
+          
+          :emissive="flattenProps(comp.props).emissive ?? '#000000'"
+          :emissive-intensity="flattenProps(comp.props).emissiveIntensity ?? 1.0"
+          
+          @ready="onMaterialCreated"
+        />
       </TresMesh>
+
+      <ModelRenderer 
+        v-if="comp.type === 'ModelRenderer'"
+        :node-id="node.id"
+        :src="flattenProps(comp.props).src"
+        :target-node-name="flattenProps(comp.props).targetNodeName"
+        :recursive="flattenProps(comp.props).recursive"
+      />
+
+      <SkinnedModel
+        v-if="comp.type === 'SkinnedMesh'"
+        :node-id="node.id"
+        :src="flattenProps(comp.props).src"
+        :speed="flattenProps(comp.props).speed"
+        :default-animation="flattenProps(comp.props).defaultAnimation"
+      />
 
       <ScriptRunner 
         v-if="isPlaying.value && comp.type === 'Script'"
@@ -106,6 +152,18 @@ const scale = computed(() => [...props.node.scale])
            :color="flattenProps(comp.props).isMain ? '#42b883' : '#ffffff'"
          />
       </TresGroup>
+
+      <UIWidget 
+        v-if="comp.type === 'UIWidget' && comp.active !== false"
+        
+        :src="flattenProps(comp.props).uiPath"
+        :node-id="node.id"
+        :visible="node.visible !== false"
+        
+        :mode="flattenProps(comp.props).mode"
+        :resolution="flattenProps(comp.props).resolution"
+        :occlude="flattenProps(comp.props).occlude"
+      />
       
     </template>
 

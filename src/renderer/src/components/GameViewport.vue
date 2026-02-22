@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { defineAsyncComponent } from 'vue'
 import { IGameNode } from '../types/schema'
 
 // 异步加载组件是个好习惯，尤其是区分 Editor/Player 时

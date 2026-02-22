@@ -68,7 +68,23 @@ const handleContextMenu = (e: MouseEvent, node?: IGameNode) => {
           { label: 'Point Light', action: () => editorActions.addNode('Light', 'Point', targetId) },
           { label: 'Directional Light', action: () => editorActions.addNode('Light', 'Directional', targetId) }
         ]
-      }
+      },
+      {
+      label: 'UI',
+      children: [
+        { 
+          label: 'Screen Widget', 
+          icon: '🖼️', 
+          // 创建一个空节点，并挂载 UIWidget 组件
+          action: () => {
+             // 这里的实现需要 editorActions 支持 addNodeWithComponent 
+             // 或者简单的做法：先 create Empty，然后手动 add component
+             // 为了简便，我们复用 addNode，让它支持带默认组件创建
+             editorActions.addNode('UIWidget', 'New UI', targetId) 
+          } 
+        }
+      ]
+    }
     ]
   })
 
@@ -110,17 +126,20 @@ const onDragOver = (e: DragEvent) => {
 const onDrop = (e: DragEvent) => {
   if (!e.dataTransfer) return
 
-  // 尝试获取两种数据
   const draggedNodeId = e.dataTransfer.getData('node-id')
   const assetPath = e.dataTransfer.getData('asset/path')
 
-  // 情况 A: 内部节点移动 (拖到根目录)
+  // 情况 A: 内部节点移动
   if (draggedNodeId) {
     editorActions.moveNode(draggedNodeId, null)
   }
-  // 情况 B: 宏实例化 (拖到根目录)
+  // 情况 B: 宏实例化 (.macro)
   else if (assetPath && assetPath.endsWith('.macro')) {
     editorActions.instantiateMacro(assetPath, null)
+  }
+  // 🟢 情况 C: 模型导入 (.glb)
+  else if (assetPath && (assetPath.endsWith('.glb') || assetPath.endsWith('.fbx'))) {
+    editorActions.addModelNode(assetPath, null)
   }
 }
 

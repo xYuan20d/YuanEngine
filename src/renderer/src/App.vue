@@ -9,8 +9,139 @@ import { IGameNode } from './types/schema'
 import { Cloner } from './engine/Cloner'
 import { FileSystem } from './engine/FileSystem'
 import * as THREE from 'three'
-import SceneBreadcrumbs from './components/SceneBreadcrumbs.vue' // 🟢 新增
-import { SceneManager } from './engine/SceneManager' // 🟢 新增
+import SceneBreadcrumbs from './components/SceneBreadcrumbs.vue'
+import { SceneManager } from './engine/SceneManager'
+import { AssetManager } from './engine/AssetManager'
+import { ProjectConfig } from './engine/Engine'
+
+
+const addModelNode = async (relativePath: string, parentId: string | null) => {
+  if (!projectRoot.value) return
+
+  // 1. 加载模型
+  const rootObject = await AssetManager.loadModel(projectRoot.value, relativePath)
+  if (!rootObject) {
+    alert('Failed to load model')
+    return
+  }
+
+  // 2. 🔍 智能检测特征
+  let hasSkinning = false
+  rootObject.traverse((c) => {
+    if ((c as THREE.SkinnedMesh).isSkinnedMesh) hasSkinning = true
+  })
+  
+  const hasAnimations = rootObject.userData.__animations && rootObject.userData.__animations.length > 0
+
+  // 3. ⚖️ 决策逻辑：如果是“疑似”角色模型，询问用户
+  let useBlackBoxMode = false
+
+  if (hasSkinning || hasAnimations) {
+    // 弹窗询问用户意图
+    const msg = hasSkinning 
+      ? `检测到骨骼蒙皮 (SkinnedMesh)。\n是否将其作为一个[整体角色]导入？\n\n- 确定 (OK): 整体导入，支持动画，但无法选中子部件。\n- 取消 (Cancel): 拆解导入，可编辑内部，但骨骼动画将失效。`
+      : `检测到动画数据。\n是否将其作为一个[整体]导入以保留动画？\n\n- 确定 (OK): 整体导入，保留动画。\n- 取消 (Cancel): 拆解导入，丢弃动画，可编辑子节点。`
+    
+    useBlackBoxMode = confirm(msg)
+  }
+
+  // =========================================================
+  // 分支 A: 黑盒模式 (SkinnedMesh / 整体)
+  // =========================================================
+  if (useBlackBoxMode) {
+    console.log('[Engine] Importing as Single Object (Black Box).')
+    
+    const node: IGameNode = {
+      id: `node_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      name: relativePath.split('/').pop()?.replace(/\.glb$/i, '') || 'Character',
+      active: true,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1], 
+      components: [
+        {
+          // 如果有骨骼，用 SkinnedMesh；如果只是普通动画（如旋转的风扇），也可以用这个组件驱动
+          type: 'SkinnedMesh', 
+          props: {
+            src: { type: 'string', value: relativePath },
+            speed: { type: 'number', value: 1.0 },
+            defaultAnimation: { type: 'string', value: '' }
+          }
+        }
+      ],
+      children: [] // 不生成子节点
+    }
+
+    // 插入场景
+    addToScene(node, parentId)
+    return
+  }
+
+  // =========================================================
+  // 分支 B: 递归拆解模式 (普通静态模型)
+  // =========================================================
+  console.log('[Engine] Importing as Recursive Hierarchy.')
+
+  const parseNodeFull = (obj: THREE.Object3D): IGameNode => {
+    // A. 基础属性
+    const node: IGameNode = {
+      id: `node_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      name: obj.name || 'Node',
+      active: true,
+      position: [obj.position.x, obj.position.y, obj.position.z],
+      rotation: [obj.rotation.x, obj.rotation.y, obj.rotation.z],
+      scale: [obj.scale.x, obj.scale.y, obj.scale.z],
+      components: [],
+      children: []
+    }
+
+    // B. 根据类型添加组件
+    if ((obj as THREE.Mesh).isMesh) {
+      node.components.push({
+        type: 'ModelRenderer',
+        props: {
+          src: { type: 'string', value: relativePath },
+          targetNodeName: { type: 'string', value: obj.name }, // 指定渲染 GLB 里的哪一个零件
+          recursive: { type: 'boolean', value: false },        // 只渲染这一个，不递归
+          castShadow: { type: 'boolean', value: true },
+          receiveShadow: { type: 'boolean', value: true }
+        }
+      })
+    } else if ((obj as THREE.Light).isLight) {
+        // 如果 GLB 里自带灯光，也可以在这里解析 (暂略)
+    }
+
+    // C. 递归子节点
+    if (obj.children && obj.children.length > 0) {
+      node.children = obj.children.map(child => parseNodeFull(child))
+    }
+
+    return node
+  }
+
+  // 执行转换
+  const rootGameNode = parseNodeFull(rootObject)
+  
+  // 修正根节点名字
+  const fileName = relativePath.split('/').pop() || 'Model'
+  rootGameNode.name = fileName.replace(/\.glb$/i, '')
+
+  // 插入场景
+  addToScene(rootGameNode, parentId)
+}
+
+// 辅助函数：统一插入逻辑
+const addToScene = (node: IGameNode, parentId: string | null) => {
+  if (parentId) {
+    const parent = findNodeRecursive(sceneNodes.value, parentId)
+    if (parent) {
+      if (!parent.children) parent.children = []
+      parent.children.push(node)
+    }
+  } else {
+    sceneNodes.value.push(node)
+  }
+}
 
 
 // --- 🟢 新增：创建宏 (Save as Macro) ---
@@ -29,9 +160,9 @@ const createMacroFromNode = async (nodeId: string) => {
   delete macroData.macro 
   
   const assetsDir = await FileSystem.pathJoin(projectRoot.value, 'assets')
-  const exists = await window.fileSystem.exists(assetsDir)
+  const exists = await FileSystem.exists(assetsDir)
   if (!exists) {
-     await window.fileSystem.createDir(assetsDir)
+     await FileSystem.createDir(assetsDir)
   }
 
   const fullPath = await FileSystem.pathJoin(assetsDir, fileName)
@@ -238,14 +369,14 @@ const nodesMap = computed(() => {
 provide('nodes-map', nodesMap)
 
 onMounted(() => {
-  // 🟢 1. 初始化默认场景 (根场景)
-  // 如果没有 SceneManager 初始化，界面会是空的
-  // 这里的 null 表示当前还没保存过文件 (Untitled)
+  if (FileSystem.getEnv() === "Web") alert("This web version is for demonstration purposes only. To create your own games, please download the full app.\n\n此网页版仅供演示之用。如需创建您自己的游戏，请下载完整版应用程序。")
+
+  // 如果没有 SceneManager 初始化, 界面会是空的, 留null
   SceneManager.initRoot(demo, null)
 
   // 🟢 2. 监听保存请求 (支持多场景上下文)
-  window.fileSystem.onRequestSave(async () => {
-    // 获取当前激活的编辑器上下文 (可能是 Root，也可能是 Macro)
+  FileSystem.onRequestSave(async () => {
+    // 获取当前激活的编辑器上下文, 可能是 Root, 也可能是 Macro
     const ctx = SceneManager.activeContext.value
     if (!ctx) return
 
@@ -288,6 +419,7 @@ onMounted(() => {
       if (res.success && res.data && res.data.path) {
         // 更新全局状态
         projectRoot.value = res.data.path
+        ProjectConfig.rootPath = res.data.path
         
         // 更新 SceneManager 根上下文的路径
         ctx.filePath = res.data.path
@@ -302,10 +434,11 @@ onMounted(() => {
   })
 
   // 🟢 3. 监听打开项目
-  window.fileSystem.onProjectOpened(async (path: string) => {
+  FileSystem.onProjectOpened(async (path: string) => {
     console.log('📂 Opening project:', path)
     
     try {
+      ProjectConfig.rootPath = path
       const projectFile = await FileSystem.pathJoin(path, 'project.json')
       const res = await FileSystem.readFile(projectFile)
       
@@ -371,7 +504,7 @@ const hasMainCamera = (nodes: IGameNode[]): boolean => {
 }
 
 // --- 添加节点函数 ---
-const addNode = (type: 'Mesh' | 'Light' | 'Camera' | 'Empty', subtype: string, parentId?: string) => {
+const addNode = (type: 'Mesh' | 'Light' | 'Camera' | 'Empty' | 'UIWidget', subtype: string, parentId?: string) => {
   const id = 'node_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 5)
   
   // 1. 基础结构
@@ -379,6 +512,7 @@ const addNode = (type: 'Mesh' | 'Light' | 'Camera' | 'Empty', subtype: string, p
     id,
     name: subtype === 'Empty' ? 'New Empty' : `New ${subtype}`,
     active: true,
+    visible: true,
     position: [0, 0, 0],
     rotation: [0, 0, 0],
     scale: [1, 1, 1],
@@ -414,12 +548,29 @@ const addNode = (type: 'Mesh' | 'Light' | 'Camera' | 'Empty', subtype: string, p
       props: { geometry: subtype, args: defaultArgs, color: '#ffffff' }
     })
   } 
+  else if (type === 'UIWidget') {
+    newNode.components.push({
+      type: 'UIWidget',
+      props: { uiPath: '' } // 默认空的
+    })
+  }
   else if (type === 'Light') {
+    // 🟢 修改：根据 subtype 设置具体的灯光类型
+    const lightType = subtype === 'Directional' ? 'Directional' : 'Point'
+    
+    newNode.name = `${lightType} Light`
+    
     newNode.components.push({
       type: 'Light',
-      props: { intensity: 1, color: '#ffffff' }
+      props: { 
+        lightType: lightType, // 👈 写入类型
+        intensity: 1, 
+        color: '#ffffff',
+        distance: 0,
+        castShadow: true
+      }
     })
-  } 
+  }
   else if (type === 'Empty') {
     newNode.name = 'Empty Object' 
   }
@@ -496,6 +647,11 @@ const togglePlay = () => {
   isPlaying.value = !isPlaying.value
   if (isPlaying.value) {
     currentSelection.value = null
+    // 🟢 通知 SceneManager 切入运行环境 (生成快照)
+    SceneManager.enterPlayMode()
+  } else {
+    // 🟢 通知 SceneManager 切回编辑环境 (销毁快照)
+    SceneManager.exitPlayMode()
   }
 }
 
@@ -611,8 +767,9 @@ const pasteNode = (targetParentId: string | null) => {
   })
 }
 
+provide('current-selection-id', currentSelection)
 // 提供编辑器动作给子组件
-provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode, createMacroFromNode, instantiateMacro })
+provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode, createMacroFromNode, instantiateMacro, addModelNode })
 </script>
 
 <template>
@@ -785,7 +942,7 @@ provide('editor-actions', { addNode, deleteNode, moveNode, copyNode, pasteNode, 
   top: 10px; 
   left: 50%; 
   transform: translateX(-50%);
-  z-index: 20;
+  z-index: 99999;
   background: rgba(255, 255, 255, 0.9);
   padding: 4px; 
   border-radius: 8px;

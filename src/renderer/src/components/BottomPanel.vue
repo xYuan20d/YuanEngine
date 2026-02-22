@@ -2,16 +2,19 @@
 import { ref } from 'vue'
 import AssetBrowser from './AssetBrowser.vue'
 import ConsolePanel from './ConsolePanel.vue'
+import AnimationPanel from './AnimationPanel.vue' // 🟢 1. 引入组件
 
 // 定义页签类型
-type TabType = 'assets' | 'console' | 'terminal'
+// 🟢 2. 添加 'animation' 类型
+type TabType = 'assets' | 'console' | 'animation' | 'terminal'
 
 const activeTab = ref<TabType>('assets')
 
 const tabs = [
   { id: 'assets', label: 'Project' },
   { id: 'console', label: 'Console' },
-  { id: 'terminal', label: 'Terminal', disabled: true } // 以后做终端用
+  { id: 'animation', label: 'Animation' }, // 🟢 3. 添加选项卡
+  { id: 'terminal', label: 'Terminal', disabled: true }
 ]
 </script>
 
@@ -37,6 +40,10 @@ const tabs = [
 
       <div class="panel-view" v-show="activeTab === 'console'">
         <ConsolePanel />
+      </div>
+      
+      <div class="panel-view" v-show="activeTab === 'animation'">
+        <AnimationPanel />
       </div>
 
     </div>

@@ -1,0 +1,118 @@
+[
+  {
+    "id": "root_1",
+    "name": "Player",
+    "active": true,
+    "position": [
+      0,
+      -0.004053411943585661,
+      0
+    ],
+    "rotation": [
+      0,
+      0,
+      0
+    ],
+    "scale": [
+      1,
+      1,
+      1
+    ],
+    "components": [
+      {
+        "type": "Mesh",
+        "props": {
+          "geometry": {
+            "type": "string",
+            "value": "Box"
+          },
+          "args": [
+            1,
+            2,
+            1
+          ],
+          "color": {
+            "type": "color",
+            "value": "#409eff"
+          }
+        }
+      },
+      {
+        "type": "Script",
+        "props": {
+          "src": "scripts/DebugPhysics.js",
+          "userValues": {
+            "active": {
+              "type": "boolean",
+              "value": true
+            }
+          }
+        }
+      },
+      {
+        "type": "RigidBody",
+        "props": {
+          "bodyType": {
+            "type": "string",
+            "value": "dynamic"
+          },
+          "mass": {
+            "type": "number",
+            "value": 9999
+          },
+          "restitution": {
+            "type": "number",
+            "value": 0.5
+          },
+          "friction": {
+            "type": "number",
+            "value": 0.5
+          },
+          "isTrigger": {
+            "type": "boolean",
+            "value": false
+          },
+          "colliderType": {
+            "type": "string",
+            "value": "trimesh"
+          }
+        }
+      }
+    ],
+    "children": [
+      {
+        "id": "child_1",
+        "name": "Head",
+        "active": true,
+        "position": [
+          0,
+          1.5,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "components": [
+          {
+            "type": "Mesh",
+            "props": {
+              "geometry": "Sphere",
+              "args": [
+                1
+              ],
+              "color": "#f56c6c"
+            }
+          }
+        ],
+        "children": []
+      }
+    ]
+  }
+]

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, inject, watch, computed, nextTick, onUnmounted } from 'vue'
+import { ref, inject, watch, computed, nextTick } from 'vue'
 import { FileSystem, FileEntry } from '../engine/FileSystem'
 import { useContextMenu } from '../composables/useContextMenu'
-import { SceneManager } from '../engine/SceneManager' // 🟢 1. 引入 SceneManager
+import { SceneManager } from '../engine/SceneManager'
 
 // --- 基础状态 ---
 const projectRoot = inject('project-root') as any
@@ -10,22 +10,112 @@ const currentPath = ref<string>('')
 const files = ref<FileEntry[]>([])
 const { showContextMenu } = useContextMenu()
 
-// --- 选中系统 (Selection System) ---
-const selectedPaths = ref<Set<string>>(new Set()) // 存储被选中的文件完整路径
-const lastSelectedPath = ref<string | null>(null) // 用于 Shift 连选(暂未实现)或定位
+// --- 选中系统 ---
+const selectedPaths = ref<Set<string>>(new Set()) 
+const lastSelectedPath = ref<string | null>(null)
 
-// --- 框选系统 (Marquee Selection) ---
+// --- 框选系统 ---
 const isSelecting = ref(false)
 const selectionBox = ref({ x: 0, y: 0, w: 0, h: 0 })
 const startPos = { x: 0, y: 0 }
 const containerRef = ref<HTMLElement | null>(null)
 
 // --- 重命名系统 ---
-const renamingPath = ref<string | null>(null) // 当前正在重命名的文件路径
+const renamingPath = ref<string | null>(null)
 const renameInput = ref<string>('')
 const renameInputRef = ref<HTMLInputElement | null>(null)
 
-// 1. 加载文件
+// --- 图标系统 (新增) ---
+// 定义不同类型的 SVG 路径
+// --- 图标系统 (工业/极简风格) ---
+const ICON_PATHS = {
+  // 文件夹：经典的扁平文件夹，实心但颜色低调
+  folder: "M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z",
+  
+  // Project.json：一个齿轮，代表引擎核心配置 (不加文件边框，直接展示核心元素)
+  project: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z",
+  
+  // 3D Model：线框立方体 (更具技术感)
+  model: "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z M7.5 4.21l4.5 2.6 4.5-2.6m-9 15.58V9.42l4.5 2.6v7.71m9-7.71v-7.71l-4.5 2.6v7.71",
+  
+  // Script：文件轮廓 + 尖括号 (代表逻辑)
+  script: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z M9.5 14l-2.5-2.5 2.5-2.5 M14.5 14l2.5-2.5-2.5-2.5",
+  
+  // UI (.vue)：方框内的布局分割 (类似网页/HUD)
+  ui: "M3 3h18v18H3V3zm0 5h18M9 8v13",
+  
+  // File (Generic)：极简折角纸张
+  file: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z M14 2v6h6",
+  
+  // Image：极简山峰
+  image: "M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5z",
+  
+  // Data (JSON)：大括号
+  data: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M10 10a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1 M14 10a1 1 0 0 1 1 1v1a1 1 0 0 0 1 1 1 1 0 0 0-1 1v1a1 1 0 0 1-1 1",
+  
+  // Macro：节点连接图
+  macro: "M5 7h4v4H5V7zm10 6h4v4h-4v-4zm-4-3h4" // 简化的连线示意
+}
+
+// 获取文件图标配置
+const resolveFileIcon = (file: FileEntry) => {
+  // 文件夹：由于是最常见的，使用稍微深一点的灰金色，或者完全的深灰色
+  if (file.isDirectory) {
+    // 工业风文件夹通常是实心的，颜色较深
+    return { path: ICON_PATHS.folder, color: '#8caebf', fill: '#8caebf', strokeWidth: 0 } // 蓝灰色实心
+    // 或者纯灰: color: '#71717a', fill: '#71717a'
+  }
+
+  const ext = file.name.split('.').pop()?.toLowerCase() || ''
+  const baseStroke = '#64748b' // 统一的基础线条颜色 (Slate-500)
+  const baseFill = 'none'
+
+  // 1. Project.json (核心)
+  if (file.name === 'project.json' && currentPath.value === '') {
+    // 红色太警示了，用深红色或紫色表示"核心"
+    return { path: ICON_PATHS.project, color: '#be185d', fill: 'transparent', strokeWidth: 1.5 } 
+  }
+
+  // 2. 3D Models (Mesh)
+  if (['glb', 'gltf', 'fbx', 'obj'].includes(ext)) {
+    // 橙色/土色，代表几何体，但饱和度低
+    return { path: ICON_PATHS.model, color: '#d97706', fill: 'none', strokeWidth: 1.2 } 
+  }
+
+  // 3. Scripts (Logic)
+  if (['js', 'ts'].includes(ext)) {
+    // 稍微带点黄色的灰
+    return { path: ICON_PATHS.script, color: '#eab308', fill: 'none', strokeWidth: 1.2 }
+  }
+
+  // 4. UI (Vue)
+  if (ext === 'vue') {
+    // 青色/蓝绿色，代表界面
+    return { path: ICON_PATHS.ui, color: '#0d9488', fill: 'none', strokeWidth: 1.2 } 
+  }
+
+  // 5. Macro (Blueprints)
+  if (ext === 'macro') {
+    // 紫色线条
+    return { path: ICON_PATHS.macro, color: '#9333ea', fill: 'none', strokeWidth: 1.2 }
+  }
+
+  // 6. Data
+  if (['json', 'yaml', 'xml'].includes(ext)) {
+    return { path: ICON_PATHS.data, color: '#57534e', fill: 'none', strokeWidth: 1.2 } // Stone gray
+  }
+
+  // 7. Images
+  if (['png', 'jpg', 'jpeg', 'svg', 'bmp'].includes(ext)) {
+    return { path: ICON_PATHS.image, color: '#7c3aed', fill: 'none', strokeWidth: 1.2 }
+  }
+
+  // Default File
+  return { path: ICON_PATHS.file, color: '#94a3b8', fill: 'none', strokeWidth: 1.2 }
+}
+
+// --- 业务逻辑 (保持原样) ---
+
 const loadFiles = async () => {
   if (!projectRoot.value) return
   
@@ -36,24 +126,25 @@ const loadFiles = async () => {
   const res = await FileSystem.readDir(fullPath)
   if (res.success && res.data) {
     files.value = res.data.sort((a, b) => {
-      if (a.isDirectory === b.isDirectory) return a.name.localeCompare(b.name)
-      return a.isDirectory ? -1 : 1
+      // 排序优化：文件夹 > project.json > 其他文件
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+      if (currentPath.value === '') {
+        if (a.name === 'project.json') return -1
+        if (b.name === 'project.json') return 1
+      }
+      return a.name.localeCompare(b.name)
     })
-    // 刷新后清理选中状态，防止选中不存在的文件
     selectedPaths.value.clear()
   }
 }
 
 watch([projectRoot, currentPath], loadFiles, { immediate: true })
 
-// 辅助：获取文件的相对路径
 const getRelPath = (fileName: string) => currentPath.value ? `${currentPath.value}/${fileName}` : fileName
 
-// --- 选中逻辑 ---
 const selectItem = (file: FileEntry, multi: boolean = false) => {
   const path = getRelPath(file.name)
   if (multi) {
-    // Ctrl/Cmd + Click: 切换选中
     if (selectedPaths.value.has(path)) {
       selectedPaths.value.delete(path)
     } else {
@@ -61,7 +152,6 @@ const selectItem = (file: FileEntry, multi: boolean = false) => {
       lastSelectedPath.value = path
     }
   } else {
-    // 单选
     selectedPaths.value.clear()
     selectedPaths.value.add(path)
     lastSelectedPath.value = path
@@ -73,82 +163,51 @@ const clearSelection = () => {
   lastSelectedPath.value = null
 }
 
-// --- 框选逻辑 ---
 const onMouseDown = (e: MouseEvent) => {
-  // 如果点在项目上或滚动条上，不触发框选
   if ((e.target as HTMLElement).closest('.grid-item')) return
-  
   isSelecting.value = true
-  // 记录相对于容器的坐标（需要减去容器的 offset 和 scroll）
   if (!containerRef.value) return
   const rect = containerRef.value.getBoundingClientRect()
-  
   startPos.x = e.clientX - rect.left + containerRef.value.scrollLeft
   startPos.y = e.clientY - rect.top + containerRef.value.scrollTop
-  
   selectionBox.value = { x: startPos.x, y: startPos.y, w: 0, h: 0 }
-  
-  // 如果没按 Ctrl，先清空选中
-  if (!e.ctrlKey && !e.metaKey) {
-    clearSelection()
-  }
-
+  if (!e.ctrlKey && !e.metaKey) clearSelection()
   document.addEventListener('mousemove', onMouseMove)
   document.addEventListener('mouseup', onMouseUp)
 }
 
 const onMouseMove = (e: MouseEvent) => {
   if (!isSelecting.value || !containerRef.value) return
-  
   const rect = containerRef.value.getBoundingClientRect()
   const currentX = e.clientX - rect.left + containerRef.value.scrollLeft
   const currentY = e.clientY - rect.top + containerRef.value.scrollTop
-  
-  // 计算矩形 (支持反向拖拽)
   const x = Math.min(startPos.x, currentX)
   const y = Math.min(startPos.y, currentY)
   const w = Math.abs(currentX - startPos.x)
   const h = Math.abs(currentY - startPos.y)
-  
   selectionBox.value = { x, y, w, h }
-  
-  // 实时计算碰撞 (选中物体)
   updateSelectionByBox()
 }
 
 const updateSelectionByBox = () => {
   if (!containerRef.value) return
   const items = containerRef.value.querySelectorAll('.grid-item:not(.back-item)')
-  
   items.forEach((el) => {
     const itemEl = el as HTMLElement
-    // 获取每个 Item 相对于容器的坐标
     const itemLeft = itemEl.offsetLeft
     const itemTop = itemEl.offsetTop
     const itemRight = itemLeft + itemEl.offsetWidth
     const itemBottom = itemTop + itemEl.offsetHeight
-    
-    // 选框坐标
     const boxLeft = selectionBox.value.x
     const boxTop = selectionBox.value.y
     const boxRight = boxLeft + selectionBox.value.w
     const boxBottom = boxTop + selectionBox.value.h
-    
-    // 碰撞检测 (AABB)
     const isIntersecting = !(boxRight < itemLeft || boxLeft > itemRight || boxBottom < itemTop || boxTop > itemBottom)
     
     const fileName = itemEl.dataset.filename
     if (!fileName) return
     const path = getRelPath(fileName)
-    
-    if (isIntersecting) {
-      selectedPaths.value.add(path)
-    } else {
-      // 只有在没按 Ctrl 的情况下才移除（为了简单，这里简化了逻辑，暂不支持框选减选）
-      // 实际生产中通常会记录 "框选开始前的选中状态" 来做 diff
-      // 这里简单处理：只要不碰就不选
-      // selectedPaths.value.delete(path) 
-    }
+    if (isIntersecting) selectedPaths.value.add(path)
   })
 }
 
@@ -159,11 +218,9 @@ const onMouseUp = () => {
   document.removeEventListener('mouseup', onMouseUp)
 }
 
-// --- 重命名逻辑 ---
 const startRename = (file: FileEntry) => {
   renamingPath.value = getRelPath(file.name)
   renameInput.value = file.name
-  // 等待 DOM 更新后聚焦 Input
   nextTick(() => {
     if (renameInputRef.value) {
       renameInputRef.value.focus()
@@ -176,79 +233,48 @@ const confirmRename = async () => {
   if (!renamingPath.value) return
   const oldName = renamingPath.value.split('/').pop() || ''
   const newName = renameInput.value.trim()
-  
   if (newName && newName !== oldName) {
-    // 执行重命名
     const oldPathFull = await FileSystem.pathJoin(projectRoot.value, currentPath.value, oldName)
     const newPathFull = await FileSystem.pathJoin(projectRoot.value, currentPath.value, newName)
-    
     const res = await FileSystem.rename(oldPathFull, newPathFull)
-    if (res.success) {
-      loadFiles()
-    } else {
-      alert('Rename failed: ' + res.error)
-    }
+    if (res.success) loadFiles()
+    else alert('Rename failed: ' + res.error)
   }
-  
-  renamingPath.value = null // 退出重命名模式
+  renamingPath.value = null
 }
 
 const cancelRename = () => {
   renamingPath.value = null
 }
 
-// --- 拖拽移动 (Internal Drag & Drop) ---
 const onDragStart = (e: DragEvent, file: FileEntry) => {
   if (!e.dataTransfer) return
-  
-  // 如果拖拽的是已选中的，则拖拽所有选中的
-  // 如果拖拽的是未选中的，则只拖拽这一个
   const path = getRelPath(file.name)
-  if (!selectedPaths.value.has(path)) {
-    selectItem(file)
-  }
-  
+  if (!selectedPaths.value.has(path)) selectItem(file)
   const itemsToDrag = Array.from(selectedPaths.value)
-  
-  // 核心数据 (给 Scene 用)
   e.dataTransfer.setData('asset/type', file.isDirectory ? 'folder' : 'file')
   e.dataTransfer.setData('asset/name', file.name)
   e.dataTransfer.setData('asset/path', path)
-  
-  // 内部数据 (给 AssetBrowser 自己用)
   e.dataTransfer.setData('internal/move', JSON.stringify(itemsToDrag))
   e.dataTransfer.effectAllowed = 'copyMove'
 }
 
 const onDrop = async (e: DragEvent, targetFolder?: FileEntry) => {
   const moveData = e.dataTransfer?.getData('internal/move')
-  if (!moveData) return // 不是内部文件拖拽，可能是外部文件
-  
+  if (!moveData) return 
   const srcPaths: string[] = JSON.parse(moveData)
-  
-  // 确定目标路径
   let targetRelPath = currentPath.value
-  if (targetFolder) {
-    // 拖进了一个文件夹
-    targetRelPath = targetRelPath ? `${targetRelPath}/${targetFolder.name}` : targetFolder.name
-  }
-  
-  // 执行移动
+  if (targetFolder) targetRelPath = targetRelPath ? `${targetRelPath}/${targetFolder.name}` : targetFolder.name
   for (const srcRel of srcPaths) {
     const fileName = srcRel.split('/').pop() || ''
-    // 防止自己拖进自己
     if (srcRel === targetRelPath) continue 
-    
     const srcFull = await FileSystem.pathJoin(projectRoot.value, srcRel)
     const destFull = await FileSystem.pathJoin(projectRoot.value, targetRelPath, fileName)
-    
-    await FileSystem.rename(srcFull, destFull) // Move 本质就是 Rename 路径
+    await FileSystem.rename(srcFull, destFull)
   }
-  
   loadFiles()
 }
 
-// --- 交互逻辑 ---
 const onDoubleClick = async (file: FileEntry) => {
   if (file.isDirectory) {
     currentPath.value = getRelPath(file.name)
@@ -256,31 +282,13 @@ const onDoubleClick = async (file: FileEntry) => {
   } 
   else if (file.name.endsWith('.macro')) {
     if (!projectRoot.value) return
-
     const fullPath = await FileSystem.pathJoin(projectRoot.value, currentPath.value, file.name)
-    
-    // 打开宏，并传入“离开时的闭包”
     await SceneManager.openMacro(file.name, fullPath, async (ctx) => {
-      
-      // 💾 自动保存逻辑
-      // 只有当数据变脏了 (isDirty) 才写盘，避免无效 IO
       if (ctx.isDirty && ctx.filePath) {
         console.log(`[AutoSave] Saving macro: ${ctx.name}`)
-        
-        // 序列化
         const data = JSON.stringify(ctx.nodes, null, 2)
-        
-        // 写入
-        const res = await FileSystem.writeFile(ctx.filePath, data)
-        
-        if (res.success) {
-           // 可选：给个轻提示 toast
-           console.log('✅ Macro saved successfully')
-        } else {
-           alert('Failed to auto-save macro!')
-        }
+        await FileSystem.writeFile(ctx.filePath, data)
       }
-      
     })
   }
 }
@@ -293,45 +301,25 @@ const navigateUp = () => {
   clearSelection()
 }
 
-// 右键菜单
 const onContextMenu = (e: MouseEvent, file?: FileEntry) => {
-  // 优化：右键点击未选中的，先选中它
   if (file) {
     const path = getRelPath(file.name)
-    if (!selectedPaths.value.has(path)) {
-      selectItem(file)
-    }
-  } else {
-    // 点击空白处，如果不是在多选操作，可以考虑取消选中，或者保持
-    // 这里选择保持，符合 Windows 习惯
+    if (!selectedPaths.value.has(path)) selectItem(file)
   }
-
   const menu = []
-  
-  // 针对选中的文件操作
   if (selectedPaths.value.size > 0) {
     const count = selectedPaths.value.size
-    menu.push({ 
-      label: count > 1 ? `Delete ${count} Items` : 'Delete', 
-      action: () => deleteSelected() 
-    })
-    
-    if (count === 1 && file) {
-       menu.push({ label: 'Rename', action: () => startRename(file) })
-    }
+    menu.push({ label: count > 1 ? `Delete ${count} Items` : 'Delete', action: () => deleteSelected() })
+    if (count === 1 && file) menu.push({ label: 'Rename', action: () => startRename(file) })
     menu.push({ separator: true })
   }
-  
   menu.push({ label: 'New Folder', action: () => createFolder() })
   menu.push({ label: 'New Script', action: () => createScript() })
   menu.push({ label: 'Refresh', action: loadFiles })
-
   showContextMenu(e, menu)
 }
 
-// --- CRUD ---
 const createFolder = async () => {
-  // 这里的 Prompt 也可以优化成内联新建，为了简单先保留 Prompt
   const name = prompt('Folder Name:', 'New Folder')
   if (!name) return
   const fullPath = await FileSystem.pathJoin(projectRoot.value, currentPath.value, name)
@@ -342,10 +330,7 @@ const createFolder = async () => {
 const createScript = async () => {
     const name = prompt('Script Name:', 'NewScript.js')
     if (!name) return
-    const template = `export default class ${name.replace('.js', '')} extends Behaviour {
-  onStart() { console.log('${name} started'); }
-  onUpdate(dt) {}
-}`
+    const template = `export default class ${name.replace('.js', '')} extends Behaviour {\n  onStart() { console.log('${name} started'); }\n  onUpdate(dt) {}\n}`
     const fullPath = await FileSystem.pathJoin(projectRoot.value, currentPath.value, name)
     await FileSystem.writeFile(fullPath, template)
     loadFiles()
@@ -353,7 +338,6 @@ const createScript = async () => {
 
 const deleteSelected = async () => {
   if (!confirm(`Delete ${selectedPaths.value.size} items?`)) return
-  
   for (const relPath of selectedPaths.value) {
     const fullPath = await FileSystem.pathJoin(projectRoot.value, relPath)
     await FileSystem.delete(fullPath)
@@ -362,7 +346,6 @@ const deleteSelected = async () => {
   clearSelection()
 }
 
-// 面包屑
 const breadcrumbs = computed(() => {
   const parts = currentPath.value ? currentPath.value.split('/') : []
   return ['Assets', ...parts]
@@ -418,7 +401,8 @@ const navigateToBreadcrumb = (index: number) => {
         :class="{ 
           folder: file.isDirectory, 
           selected: selectedPaths.has(getRelPath(file.name)),
-          renaming: renamingPath === getRelPath(file.name)
+          renaming: renamingPath === getRelPath(file.name),
+          'is-project': file.name === 'project.json' && currentPath === ''
         }"
         :data-filename="file.name"
         draggable="true"
@@ -430,15 +414,16 @@ const navigateToBreadcrumb = (index: number) => {
         @contextmenu.stop.prevent="(e) => onContextMenu(e, file)"
       >
         <div class="icon-wrapper">
-          <svg v-if="file.isDirectory" class="folder-icon" viewBox="0 0 24 24" fill="#fbbf24" stroke="currentColor">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-          </svg>
-          <svg v-else-if="file.name.endsWith('.macro')" class="file-icon macro-icon" viewBox="0 0 24 24" fill="#e1bee7" stroke="#8e44ad">
-            <path d="M21 16.5c0 .38-.21.71-.53.88l-7.9 4.44c-.16.12-.36.18-.57.18s-.41-.06-.57-.18l-7.9-4.44A.991.991 0 0 1 3 16.5v-9c0-.38.21-.71.53-.88l7.9-4.44c.16-.12.36-.18.57-.18s.41.06.57.18l7.9 4.44c.32.17.53.5.53.88v9zM12 4.15 6.04 7.5 12 10.85l5.96-3.35L12 4.15zM5 15.91l6 3.38v-6.71L5 9.21v6.7zm14 0v-6.7l-6 3.37v6.71l6-3.38z"/>
-          </svg>
-          <svg v-else class="file-icon" viewBox="0 0 24 24" fill="#f3f4f6" stroke="#9ca3af">
-            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-            <polyline points="13 2 13 9 20 9" />
+          <svg 
+            class="file-icon" 
+            viewBox="0 0 24 24" 
+            :fill="resolveFileIcon(file).fill" 
+            :stroke="resolveFileIcon(file).color"
+            :stroke-width="resolveFileIcon(file).strokeWidth || 2"
+            stroke-linecap="round" 
+            stroke-linejoin="round"
+          >
+            <path :d="resolveFileIcon(file).path" />
           </svg>
         </div>
         
@@ -453,7 +438,12 @@ const navigateToBreadcrumb = (index: number) => {
             @keydown.esc="cancelRename"
             @click.stop
           />
-          <div v-else class="label" :title="file.name">{{ file.name }}</div>
+          <div v-else class="label" :title="file.name">
+            <span v-if="file.name === 'project.json' && currentPath === ''" style="font-weight:bold; color: #b91c1c;">
+              PROJECT
+            </span>
+            <span v-else>{{ file.name }}</span>
+          </div>
         </div>
       </div>
 
@@ -508,11 +498,12 @@ const navigateToBreadcrumb = (index: number) => {
   overflow-y: auto;
   padding: 8px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
-  grid-auto-rows: 80px;
+  /* 调整列宽：最小 72px，适应长文件名 */
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  grid-auto-rows: 88px;
   gap: 4px;
   align-content: start;
-  position: relative; /* 关键：给框选框做定位基准 */
+  position: relative;
 }
 
 .grid-item {
@@ -522,42 +513,84 @@ const navigateToBreadcrumb = (index: number) => {
   justify-content: flex-start;
   padding: 6px 4px;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: 4px; /* 稍微硬一点的圆角 */
   cursor: pointer;
-  transition: all 0.1s;
+  transition: background 0.1s;
   position: relative;
+  overflow: hidden; /* 防止内容撑破容器 */
 }
 
 .grid-item:hover { background: #f0f5ff; }
-.grid-item.selected { background: #cce8ff; border-color: #99d1ff; }
-/* 当重命名时，背景变白，边框消失 */
+.grid-item.selected { 
+  background: #e2e8f0; /* Slate-200 */
+  border-color: #94a3b8; 
+}
 .grid-item.renaming { background: transparent; border-color: transparent; }
 
-.icon-wrapper { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
+/* Project文件特殊样式 */
+.grid-item.is-project { 
+  background: transparent; 
+  border: 1px dashed #be5380; /* 虚线框表示特殊 */
+}
+.grid-item.is-project .label {
+  color: #be185d;
+  font-weight: 600;
+}
+.grid-item.is-project:hover { background: #fee2e2; }
+
+.icon-wrapper { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; margin-bottom: 6px; padding: 4px; }
 .icon-wrapper.tiny { font-size: 20px; }
-.folder-icon, .file-icon { width: 100%; height: 100%; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.05)); }
+
+/* 统一图标样式 */
+.file-icon {
+  width: 100%;
+  height: 100%;
+  /* 移除投影，追求扁平化 */
+  filter: none; 
+  /* 降低一点透明度，不那么刺眼 */
+  opacity: 0.85; 
+}
+
+.grid-item:hover .file-icon {
+  transform: none; /* 工业软件通常不搞缩放动画，或者非常快 */
+  opacity: 1;
+}
 
 .label-area { width: 100%; display: flex; justify-content: center; }
 .label {
-  font-size: 10px; text-align: center; color: #444; width: 100%;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2;
-  padding: 1px 3px; border-radius: 2px;
+  font-size: 11px;
+  color: #475569; /* Slate-600 */
+  text-align: center;
+  width: 100%;
+  
+  /* 方案A：单行截断 (最整洁) */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  
+  /* 方案B：如果你想要两行显示 (取消注释下面几行，注释掉 white-space: nowrap) */
+  /* display: -webkit-box; */
+  /* -webkit-line-clamp: 2; */
+  /* -webkit-box-orient: vertical; */
+  /* overflow: hidden; */
+  /* word-break: break-all; */
+  
+  line-height: 1.2;
+  padding: 0 2px;
 }
 .selected .label { color: #000; background: rgba(255,255,255,0.2); }
 
-/* 重命名输入框 */
 .rename-input {
-  width: 90%; font-size: 10px; text-align: center;
-  border: 1px solid #409eff; outline: none; padding: 1px;
+  width: 96%; font-size: 11px; text-align: center;
+  border: 1px solid #409eff; outline: none; padding: 2px;
   background: #fff; color: #333; z-index: 10;
 }
 
-/* 框选框样式 */
 .selection-box {
   position: absolute;
   background: rgba(0, 120, 215, 0.2);
   border: 1px solid rgba(0, 120, 215, 0.6);
-  pointer-events: none; /* 让鼠标事件穿透选框，否则无法 mouseup */
+  pointer-events: none;
   z-index: 999;
 }
 

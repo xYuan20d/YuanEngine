@@ -127,40 +127,58 @@ watch(() => props.object3d.userData.physicsBody, (body) => {
 // 帧循环：物理驱动视觉
 const { onBeforeRender } = useLoop()
 
+const _tempAxisY = new THREE.Vector3(0, 1, 0)
+const _tempAxisX = new THREE.Vector3(1, 0, 0)
+const _qSteer = new THREE.Quaternion()
+const _qRoll = new THREE.Quaternion()
+
 onBeforeRender(() => {
-  // 如果控制器没准备好，或者 userData 已经被清理，不执行
   if (!vehicleController || !props.object3d.userData.vehicle) return
 
   try {
-    // 1. 更新物理世界的车辆模拟
+    // 1. 物理步进
     vehicleController.updateVehicle(world.timestep)
     
-    // 2. 同步轮子视觉模型
+    // 2. 同步轮子
     const wheelsMeta = props.object3d.userData.vehicle.wheels
+    
     for (let i = 0; i < vehicleController.numWheels(); i++) {
         const meta = wheelsMeta[i]
         if (!meta || !meta.mesh) continue
         
-        // 获取物理状态
+        // --- A. 获取物理数据 ---
         const connection = vehicleController.wheelChassisConnectionPoint(i)
         const suspensionLen = vehicleController.wheelSuspensionLength(i)
         const dir = vehicleController.wheelDirection(i)
-        // 注意：Rapier 暂未直接提供完整的 wheel quaternion，这里只同步位移
-        // 旋转通常由脚本根据 steering 和 rolling 手动计算，或者使用 lookAt
         
-        // 计算轮子相对于车身的局部位置 = 挂载点 + 方向 * 当前悬挂长度
+        // 🟢 关键：从引擎获取当前的滚动弧度 (Rolling) 和 转向弧度 (Steering)
+        const rawRotation = vehicleController.wheelRotation(i) || 0
+        const rawSteer = vehicleController.wheelSteering(i) || 0
+
+        // 🟢 关键：把数据存回 meta，这样你的 CarController.js 就能读到了！
+        meta.rotation = rawRotation // 累计滚动的弧度
+        meta.steering = rawSteer    // 当前转向的弧度
+
+        // --- B. 同步位置 ---
         const currentLocalPos = new THREE.Vector3()
           .copy(connection as any)
           .addScaledVector(dir as any, suspensionLen)
         
         meta.mesh.position.copy(currentLocalPos)
         
-        // 简单的视觉旋转同步 (可选，根据 Steering 旋转 Y 轴)
-        // const steer = vehicleController.wheelSteering(i)
-        // meta.mesh.rotation.y = steer // 简单近似
+        // --- C. 同步旋转 (修复后轮不转的问题) ---
+        // 1. 计算转向四元数 (绕 Y 轴)
+        _qSteer.setFromAxisAngle(_tempAxisY, rawSteer)
+        
+        // 2. 计算滚动四元数 (绕 X 轴)
+        // 这里的 rawRotation 是累加值，车动得越久，值越大，正是我们要的
+        _qRoll.setFromAxisAngle(_tempAxisX, rawRotation)
+        
+        // 3. 合并旋转: 先转向，再滚动
+        // meta.mesh 是挂在车身下的，所以直接设置局部旋转即可
+        meta.mesh.quaternion.copy(_qSteer).multiply(_qRoll)
     }
   } catch (e) {
-    // 忽略单帧错误，防止渲染循环炸崩导致页面卡死
     // console.warn('[Vehicle] Update error', e)
   }
 })

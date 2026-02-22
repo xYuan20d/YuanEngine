@@ -29,9 +29,15 @@ interface IFileSystemAdapter {
   mkdir(path: string): Promise<FileResult<void>>
   copy(src: string, dest: string): Promise<FileResult<void>>
 
+  // 当前系统
+  getEnv(): string
+
   // 项目管理特有 API
   saveProject(path: string, data: string): Promise<FileResult<void>>
   saveProjectAs?(data: string): Promise<FileResult<{ path: string }>>
+
+  onProjectOpened(callback: (path: string) => void): void
+  onRequestSave(callback: () => void): void
 }
 
 // 3. Electron 适配器实现
@@ -124,6 +130,22 @@ class ElectronAdapter implements IFileSystemAdapter {
     const res = await this.api.saveProjectAs(data)
     return { success: res.success, data: res.path ? { path: res.path } : undefined, error: res.error }
   }
+
+  onProjectOpened(callback: (path: string) => void) {
+    if (this.api?.onProjectOpened) {
+      this.api.onProjectOpened(callback)
+    }
+  }
+
+  onRequestSave(callback: () => void) {
+    if (this.api?.onRequestSave) {
+      this.api.onRequestSave(callback)
+    }
+  }
+
+  getEnv(): string {
+    return "Electron"
+  }
 }
 
 // 4. Web 适配器实现 (Mock)
@@ -146,6 +168,18 @@ class WebAdapter implements IFileSystemAdapter {
 
   async saveProject() { return { success: false } }
   async saveProjectAs() { return { success: false } }
+
+  onProjectOpened(callback: (path: string) => void) {
+    console.warn('[WebFS] onProjectOpened: 浏览器环境需通过网页 UI 触发')
+  }
+
+  onRequestSave(callback: () => void) {
+    console.warn('[WebFS] onRequestSave: 浏览器环境需通过网页 UI 触发')
+  }
+
+  getEnv(): string {
+    return "Web"
+  }
 }
 
 // 5. 工厂模式
