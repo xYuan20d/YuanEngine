@@ -13,7 +13,6 @@ asarUnpack:
   - resources/**
 win:
   executableName: engine
-  skipUpdateIcon: true
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
