@@ -1,6 +1,5 @@
 // src/composables/useAnimationEditor.ts
-import { ref, shallowRef, computed, watch, reactive } from 'vue'
-import * as THREE from 'three'
+import { reactive } from 'vue'
 import { IGameNode } from '../types/schema'
 import { DiffUtil } from '../utils/DiffPatch' // 假设你已经有了这个
 import { FileSystem } from '../engine/FileSystem'
@@ -360,9 +359,9 @@ export function useAnimationEditor() {
     
     // 🟢 核心修复：Transform 必须切断引用！使用 [...array] 创建新数组
     // 之前是 node.position = snapshot.position，导致 Gizmo 修改直接污染了关键帧缓存
-    if (snapshot.position) node.position = [...snapshot.position]
-    if (snapshot.rotation) node.rotation = [...snapshot.rotation]
-    if (snapshot.scale) node.scale = [...snapshot.scale]
+    if (snapshot.position) node.position = [...snapshot.position] as [number, number, number]
+    if (snapshot.rotation) node.rotation = [...snapshot.rotation] as [number, number, number]
+    if (snapshot.scale) node.scale = [...snapshot.scale] as [number, number, number]
     
     if (snapshot.visible !== undefined) node.visible = snapshot.visible
 

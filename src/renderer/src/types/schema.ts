@@ -7,11 +7,16 @@ export interface ITypedValue {
   value: any
 }
 
+type DataNode = {
+  type: string;  // 明确 type 通常是字符串
+  value: any;    // value 保持灵活性
+};
+
 // 1. 组件数据定义
 // src/types/schema.ts
 
 export interface IComponent {
-  type: 'Mesh' | 'Light' | 'Camera' | 'Script' | 'RigidBody' | 'VehicleChassis' | 'VehicleWheel' | 'SkinnedMesh' | 'UIWidget'
+  type: 'Mesh' | 'Light' | 'Camera' | 'Script' | 'RigidBody' | 'VehicleChassis' | 'VehicleWheel' | 'SkinnedMesh' | 'UIWidget' | 'ModelRenderer'
   active?: boolean
   props: {
     // RigidBody 特有属性
@@ -30,31 +35,31 @@ export interface IComponent {
     centerOfMassOffset?: [number, number, number]
     
     // --- 新增：车轮组件 ---
-    isSteering?: boolean // 是否负责转向
-    isDrive?: boolean    // 是否负责驱动 (动力轮)
-    brakeForce?: number  // 刹车力度
+    isSteering?: boolean | DataNode // 是否负责转向
+    isDrive?: boolean | DataNode    // 是否负责驱动 (动力轮)
+    brakeForce?: number | DataNode  // 刹车力度
     
     // 悬挂微调参数 (虽然自动校准，但允许用户微调)
-    suspensionRestLength?: number // 悬挂自然长度
-    suspensionStiffness?: number  // 硬度
-    maxSuspensionTravel?: number  // 最大行程
-    radiusScale?: number // 半径缩放 (用于微调自动计算的结果)
+    suspensionRestLength?: number | DataNode // 悬挂自然长度
+    suspensionStiffness?: number | DataNode  // 硬度
+    maxSuspensionTravel?: number | DataNode  // 最大行程
+    radiusScale?: number | DataNode          // 半径缩放 (用于微调自动计算的结果)
 
     // Script 组件特有的 props 结构
     // 脚本文件的绝对路径 (Electron 环境) 或 URL
-    src?: string 
+    src?: string | DataNode
     // 脚本的名字 (用于显示)
-    name?: string 
+    name?: string | DataNode
     // 存储用户在 Inspector 设置的值
     // 比如: { speed: 5.0, isActive: false }
     userValues?: Record<string, ITypedValue | any>
 
     // 🟢 新增 SkinnedMesh 属性
-    defaultAnimation?: string
-    speed?: number
+    defaultAnimation?: string | DataNode
+    speed?: number | DataNode
 
     // 🟢 2. 新增 UI 组件属性
-    uiPath?: string
+    uiPath?: string | DataNode
     
     // 其他标准组件的 props...
     [key: string]: any 
@@ -66,7 +71,7 @@ export interface IGameNode {
   id: string
   name: string
   active: boolean
-  visible: boolean
+  visible?: boolean
   
   // 变换属性
   position: Vector3Array

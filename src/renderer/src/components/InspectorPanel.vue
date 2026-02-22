@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineProps, reactive, watch, inject } from 'vue'
+import { reactive, watch, inject } from 'vue'
 import { IGameNode } from '../types/schema'
 import InspectorAddComponent from './InspectorAddComponent.vue'
 import NodePicker from './properties/NodePicker.vue'
@@ -263,7 +263,7 @@ watch(() => props.node?.components, (newComps) => {
           <span class="arrow">▼</span>
           <span class="title">{{ comp.type }}</span>
           <span v-if="comp.type === 'Script'" style="font-size:10px; color:#999; margin-left:10px;">
-            {{ comp.props.src?.split('/').pop() || 'Empty' }}
+            {{ (comp.props.src as string)?.split('/').pop() || 'Empty' }}
           </span>
           <span class="menu" @click.stop="(e) => openComponentMenu(e, idx)">⋮</span>
         </div>

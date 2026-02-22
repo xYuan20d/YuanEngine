@@ -310,7 +310,7 @@ const handleMouseUp = () => {
   document.removeEventListener('mouseup', handleMouseUp)
 }
 
-const onTimelineScroll = (e: Event) => {
+const onTimelineScroll = (_e: Event) => {
   if (!sidebarListRef.value || !scrollContainerRef.value) return
   sidebarListRef.value.scrollTop = scrollContainerRef.value.scrollTop
 }

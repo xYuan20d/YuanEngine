@@ -51,7 +51,7 @@ const outlineRenderGroups = computed(() => {
         // 2. 检查是否成功找到了 Mesh 子节点
         rootObj.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
-            objects.push(child);
+            objects.push((child as any));
             meshCount++;
           }
         });

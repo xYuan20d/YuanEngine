@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, onUnmounted, provide, watchEffect, shallowRef } from 'vue'
+import { onUnmounted, provide, watchEffect } from 'vue'
 import { useTresContext, useLoop } from '@tresjs/core'
 import * as THREE from 'three'
 import CSM from 'three-csm'
@@ -14,26 +14,28 @@ const props = defineProps<{
 
 const { camera, scene, renderer } = useTresContext()
 const { onBeforeRender } = useLoop()
+const cam = camera as any
 
 let csmInstance: any = null
 
 // --- 核心逻辑：初始化 ---
 const initCSM = () => {
-  if (!camera.value || !scene.value) return
+  if (!(cam).value || !scene.value) return
   
   if (csmInstance) csmInstance.dispose()
 
   // 必须确保渲染器开启了阴影
-  renderer.value.shadowMap.enabled = true
-  renderer.value.shadowMap.type = THREE.PCFSoftShadowMap
+  let rend = renderer as any
+  rend.value.shadowMap.enabled = true
+  rend.value.shadowMap.type = THREE.PCFSoftShadowMap
 
   csmInstance = new CSM({
-    maxFar: props.maxFar || camera.value.far,
+    maxFar: props.maxFar || cam.value.far,
     cascades: props.cascades || 4,
     shadowMapSize: props.shadowMapSize || 2048,
     lightDirection: new THREE.Vector3(1, -1, 1).normalize(),
-    camera: camera.value as THREE.PerspectiveCamera,
-    parent: scene.value,
+    camera: cam.value as THREE.PerspectiveCamera,
+    parent: scene.value as any,
     mode: 'practical'
   })
 
@@ -53,7 +55,7 @@ provide('csm-setup-material', setupMaterial)
 
 // 每帧更新级联位置
 onBeforeRender(() => {
-  if (csmInstance && camera.value) {
+  if (csmInstance && cam.value) {
     csmInstance.update()
   }
 })

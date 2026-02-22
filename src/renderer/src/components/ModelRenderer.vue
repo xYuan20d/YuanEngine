@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted, inject, shallowRef } from 'vue'
+import { watch, onUnmounted, inject, shallowRef } from 'vue'
 import { AssetManager } from '../engine/AssetManager'
 import * as THREE from 'three'
 
@@ -52,7 +52,7 @@ const load = async () => {
         if (!props.recursive) {
           clone.clear() 
         }
-        finalObject = clone
+        finalObject = clone as any
       } else {
         // ❌ 没找到！
         console.error(`[ModelRenderer] 🔴 Target NOT FOUND: "${props.targetNodeName}"`)

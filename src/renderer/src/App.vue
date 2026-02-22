@@ -55,6 +55,7 @@ const addModelNode = async (relativePath: string, parentId: string | null) => {
       id: `node_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       name: relativePath.split('/').pop()?.replace(/\.glb$/i, '') || 'Character',
       active: true,
+      visible: true,
       position: [0, 0, 0],
       rotation: [0, 0, 0],
       scale: [1, 1, 1], 
@@ -96,24 +97,24 @@ const addModelNode = async (relativePath: string, parentId: string | null) => {
     }
 
     // B. 根据类型添加组件
-    if ((obj as THREE.Mesh).isMesh) {
+    if ((obj as any).isMesh) {
       node.components.push({
         type: 'ModelRenderer',
         props: {
           src: { type: 'string', value: relativePath },
           targetNodeName: { type: 'string', value: obj.name }, // 指定渲染 GLB 里的哪一个零件
-          recursive: { type: 'boolean', value: false },        // 只渲染这一个，不递归
+          recursive: { type: 'boolean', value: false },        // 只渲染一个，不递归
           castShadow: { type: 'boolean', value: true },
           receiveShadow: { type: 'boolean', value: true }
         }
       })
-    } else if ((obj as THREE.Light).isLight) {
-        // 如果 GLB 里自带灯光，也可以在这里解析 (暂略)
+    } else if ((obj as any).isLight) {
+        // 灯光暂时不实现
     }
 
-    // C. 递归子节点
+    // 递归子节点
     if (obj.children && obj.children.length > 0) {
-      node.children = obj.children.map(child => parseNodeFull(child))
+      node.children = obj.children.map(child => parseNodeFull((child as any)))
     }
 
     return node
@@ -162,7 +163,7 @@ const createMacroFromNode = async (nodeId: string) => {
   const assetsDir = await FileSystem.pathJoin(projectRoot.value, 'assets')
   const exists = await FileSystem.exists(assetsDir)
   if (!exists) {
-     await FileSystem.createDir(assetsDir)
+     await FileSystem.mkdir(assetsDir)
   }
 
   const fullPath = await FileSystem.pathJoin(assetsDir, fileName)
@@ -477,6 +478,7 @@ const findNodeRecursive = (nodes: IGameNode[], id: string): IGameNode | undefine
       if (found) return found
     }
   }
+  return undefined
 }
 
 // --- 删除节点函数（需要查找父节点）---

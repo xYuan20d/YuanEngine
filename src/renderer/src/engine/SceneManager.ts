@@ -52,7 +52,7 @@ const exitPlayMode = () => {
 }
 
 // 自动脏检查 (🟢 优化：仅在非运行状态下才标记脏)
-watch(() => activeContext.value?.nodes, (newVal) => {
+watch(() => activeContext.value?.nodes, (_newVal) => {
   if (activeContext.value && !isPlaying.value) {
     activeContext.value.isDirty = true
   }
@@ -77,9 +77,9 @@ const _hotReplaceMacroInNodes = (nodes: IGameNode[], macroPath: string, newMacro
       // A. 备份关键数据 (忽略列表：Transform + ID + Parent关系)
       const preservedState = {
         id: node.id,
-        position: [...node.position],
-        rotation: [...node.rotation],
-        scale: [...node.scale],
+        position: [...node.position] as [number, number, number],
+        rotation: [...node.rotation] as [number, number, number],
+        scale: [...node.scale] as [number, number, number],
         active: node.active 
       }
 

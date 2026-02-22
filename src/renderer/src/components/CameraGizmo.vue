@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { inject, computed, watch, shallowRef } from 'vue'
+import { inject, watch, shallowRef } from 'vue'
 import * as THREE from 'three'
-import { useLoop } from '@tresjs/core'
 
 const props = defineProps<{
   fov: number

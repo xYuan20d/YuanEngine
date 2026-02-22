@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onUnmounted, shallowRef, watch, inject, defineExpose } from 'vue'
+import { onUnmounted, shallowRef, watch, inject } from 'vue'
 import * as THREE from 'three'
 import { useLoop } from '@tresjs/core'
 import { AssetManager } from '../engine/AssetManager'

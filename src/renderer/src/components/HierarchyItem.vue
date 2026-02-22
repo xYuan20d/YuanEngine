@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineProps, defineEmits, inject, ref, computed } from 'vue'
+import { inject, ref, computed } from 'vue'
 import { IGameNode } from '../types/schema'
 
 // 1. 接收 props

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { shallowRef, watch, inject, onMounted, computed } from 'vue'
+import { shallowRef, watch, inject, computed } from 'vue'
 import * as Vue from 'vue'
 import { loadModule } from 'vue3-sfc-loader'
 import { FileSystem } from '../engine/FileSystem'

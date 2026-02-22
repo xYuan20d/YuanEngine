@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { defineProps } from 'vue'
 import { IGameNode } from '../types/schema'
 import { useContextMenu } from '../composables/useContextMenu'
 
@@ -10,7 +9,7 @@ const props = defineProps<{
 const { showContextMenu } = useContextMenu()
 
 const handleAddClick = (e: MouseEvent) => {
-  const menuConfig = [
+  const menuConfig: any = [
     {
       label: 'Rendering',
       children: [

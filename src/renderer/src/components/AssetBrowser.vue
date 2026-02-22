@@ -67,8 +67,6 @@ const resolveFileIcon = (file: FileEntry) => {
   }
 
   const ext = file.name.split('.').pop()?.toLowerCase() || ''
-  const baseStroke = '#64748b' // 统一的基础线条颜色 (Slate-500)
-  const baseFill = 'none'
 
   // 1. Project.json (核心)
   if (file.name === 'project.json' && currentPath.value === '') {
@@ -283,13 +281,7 @@ const onDoubleClick = async (file: FileEntry) => {
   else if (file.name.endsWith('.macro')) {
     if (!projectRoot.value) return
     const fullPath = await FileSystem.pathJoin(projectRoot.value, currentPath.value, file.name)
-    await SceneManager.openMacro(file.name, fullPath, async (ctx) => {
-      if (ctx.isDirty && ctx.filePath) {
-        console.log(`[AutoSave] Saving macro: ${ctx.name}`)
-        const data = JSON.stringify(ctx.nodes, null, 2)
-        await FileSystem.writeFile(ctx.filePath, data)
-      }
-    })
+    await SceneManager.openMacro(file.name, fullPath)
   }
 }
 
@@ -306,7 +298,7 @@ const onContextMenu = (e: MouseEvent, file?: FileEntry) => {
     const path = getRelPath(file.name)
     if (!selectedPaths.value.has(path)) selectItem(file)
   }
-  const menu = []
+  const menu: any = []
   if (selectedPaths.value.size > 0) {
     const count = selectedPaths.value.size
     menu.push({ label: count > 1 ? `Delete ${count} Items` : 'Delete', action: () => deleteSelected() })

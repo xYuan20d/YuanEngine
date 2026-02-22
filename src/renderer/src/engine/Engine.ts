@@ -13,10 +13,7 @@ export const RuntimeRegistry = new Map<string, THREE.Object3D>();
 export const Wait = Symbol('Wait');  // 挂起标识
 
 export class ProjectConfig {
-  /**
-   * 记录当前项目的根目录。
-   * 它在编辑器生命周期内是持久的，不受游戏 Play/Stop 影响。
-   */
+  // 项目根目录
   public static rootPath: string | null = null;
 }
 
@@ -271,7 +268,7 @@ export class Global {
     }
   }
 
-  static get<T = any>(key: string, defaultValue?: T): T {
+  static get<T = any>(key: string, defaultValue?: T): T | undefined{
     return key in this._data ? this._data[key] : defaultValue;
   }
 
@@ -540,7 +537,7 @@ export class Behaviour {
   getVehicle() { return this.gameObject.userData.vehicle; }
 
   onStart(): void {}
-  onUpdate(dt: number, time: number): void {}
+  onUpdate(_dt: number, _time: number): void {}
 
   onDestroy(): void {
     // 注销广播事件
@@ -620,8 +617,8 @@ export class Behaviour {
     
     if (targetId === null) {
       targetParent = this.gameObject;
-      while (targetParent.parent) {
-        targetParent = targetParent.parent;
+      while ((targetParent as any).parent) {
+        targetParent = (targetParent as any).parent;
       }
     } else {
       targetParent = RuntimeRegistry.get(targetId) || null;
@@ -697,8 +694,8 @@ export class Behaviour {
     }
   }
 
-  onTriggerEnter(other: THREE.Object3D): void {}
-  onTriggerExit(other: THREE.Object3D): void {}
-  onCollisionEnter(other: THREE.Object3D): void {}
-  onCollisionExit(other: THREE.Object3D): void {}
+  onTriggerEnter(_other: THREE.Object3D): void {}
+  onTriggerExit(_other: THREE.Object3D): void {}
+  onCollisionEnter(_other: THREE.Object3D): void {}
+  onCollisionExit(_other: THREE.Object3D): void {}
 }

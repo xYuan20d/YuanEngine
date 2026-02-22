@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { inject, onUnmounted, shallowRef } from 'vue'
+import { inject, type ShallowRef, shallowRef} from 'vue'
 import { useLoop } from '@tresjs/core'
 import * as THREE from 'three'
 import type RAPIER_TYPE from '@dimforge/rapier3d-compat'
 
-const world = inject<shallowRef<RAPIER_TYPE.World>>('physics-world')!.value
+const world = inject<ShallowRef<RAPIER_TYPE.World>>('physics-world')!.value
 const lineSegmentsRef = shallowRef<THREE.LineSegments | null>(null)
 
 // 创建 Line Geometry

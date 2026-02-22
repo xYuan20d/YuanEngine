@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, shallowRef, watchEffect, ref, reactive, watch } from 'vue'
+import { inject, shallowRef, watchEffect, ref, reactive } from 'vue'
 import { useLoop } from '@tresjs/core'
 import * as THREE from 'three'
 import { flattenProps } from '../utils/props'

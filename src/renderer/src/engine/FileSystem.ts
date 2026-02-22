@@ -34,7 +34,7 @@ interface IFileSystemAdapter {
 
   // 项目管理特有 API
   saveProject(path: string, data: string): Promise<FileResult<void>>
-  saveProjectAs?(data: string): Promise<FileResult<{ path: string }>>
+  saveProjectAs(data: string): Promise<FileResult<{ path: string }>>
 
   onProjectOpened(callback: (path: string) => void): void
   onRequestSave(callback: () => void): void
@@ -169,11 +169,11 @@ class WebAdapter implements IFileSystemAdapter {
   async saveProject() { return { success: false } }
   async saveProjectAs() { return { success: false } }
 
-  onProjectOpened(callback: (path: string) => void) {
+  onProjectOpened(_callback: (path: string) => void) {
     console.warn('[WebFS] onProjectOpened: 浏览器环境需通过网页 UI 触发')
   }
 
-  onRequestSave(callback: () => void) {
+  onRequestSave(_callback: () => void) {
     console.warn('[WebFS] onRequestSave: 浏览器环境需通过网页 UI 触发')
   }
 

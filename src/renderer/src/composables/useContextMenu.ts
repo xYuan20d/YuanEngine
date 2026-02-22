@@ -2,7 +2,7 @@
 import { ref, reactive } from 'vue'
 
 export interface MenuItem {
-  label: string
+  label?: string
   icon?: string
   shortcut?: string
   disabled?: boolean

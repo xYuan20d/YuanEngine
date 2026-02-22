@@ -81,13 +81,13 @@ const dir = new THREE.Vector3()
 // 每一帧执行检测
 onBeforeRender(() => {
   // 1. 只有在 World 模式且开启了遮挡时才计算
-  if (isScreen.value || !props.occlude || !groupRef.value || !activeCamera.value || !containerRef.value) {
+  if (isScreen.value || !props.occlude || !groupRef.value || !(activeCamera as any).value || !containerRef.value) {
     // 如果关闭遮挡或条件不满足，强制显示
     if (containerRef.value) containerRef.value.style.opacity = '1'
     return
   }
 
-  const cam = activeCamera.value
+  const cam = (activeCamera as any).value
   const uiGroup = groupRef.value
 
   // 2. 获取位置向量

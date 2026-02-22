@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, onMounted, onUnmounted, shallowRef } from 'vue'
+import { inject, onMounted, onUnmounted, type ShallowRef } from 'vue'
 import * as THREE from 'three'
 import { useLoop } from '@tresjs/core'
 import { IGameNode } from '../../types/schema'
@@ -14,7 +14,7 @@ const props = defineProps<{
 
 const emit = defineEmits(['created'])
 
-const worldRef = inject<shallowRef<RAPIER_TYPE.World | null>>('physics-world')
+const worldRef = inject<ShallowRef<RAPIER_TYPE.World | null>>('physics-world')
 const RAPIER = inject<typeof RAPIER_TYPE>('rapier-instance')!
 const registry = inject<{
   register: (h: number, n: string) => void,
@@ -69,33 +69,12 @@ const createTrimeshFromMesh = (mesh: THREE.Mesh, scale: THREE.Vector3): { vertic
   if (indexAttr) {
     indices = new Uint32Array(indexAttr.array)
   } else {
-    const arr = []
+    const arr: any = []
     for (let i = 0; i < posAttr.count; i++) arr.push(i)
     indices = new Uint32Array(arr)
   }
   
   return { vertices, indices }
-}
-
-// --- 🟢 修复 1: 辅助函数 - 必须应用缩放 ---
-
-// 将 Mesh 的几何体顶点数据，变换到 RigidBody 的坐标系下（包含缩放）
-const getScaledVertices = (mesh: THREE.Mesh, scale: THREE.Vector3): Float32Array | null => {
-  const geometry = mesh.geometry
-  if (!geometry) return null
-  
-  const posAttr = geometry.attributes.position
-  const vertices: number[] = []
-  
-  for (let i = 0; i < posAttr.count; i++) {
-    // 读取原始坐标并乘上缩放
-    vertices.push(
-      posAttr.getX(i) * scale.x,
-      posAttr.getY(i) * scale.y,
-      posAttr.getZ(i) * scale.z
-    )
-  }
-  return new Float32Array(vertices)
 }
 
 // --- 核心逻辑: 扫描并创建子碰撞体 ---
@@ -170,7 +149,7 @@ const scanAndCreateColliders = (rootBody: RAPIER_TYPE.RigidBody, rootObj: THREE.
     desc.setRotation(quat)
 
     // 创建并挂载
-    const c = worldRef.value.createCollider(desc, rootBody)
+    const c = (worldRef.value as any).createCollider(desc, rootBody)
     colliders.push(c)
     
     const ownerId = child.userData.id || props.node.id
@@ -191,10 +170,11 @@ const setupVehicle = (body: RAPIER_TYPE.RigidBody) => {
     body.mass(), 
     { x: offset[0], y: offset[1], z: offset[2] }, 
     { x: 0, y: 0, z: 0 }, 
-    { x: 0, y: 0, z: 0, w: 1 }
+    { x: 0, y: 0, z: 0, w: 1 },
+    true
   )
 
-  vehicleController = worldRef.value!.createVehicleController(body)
+  vehicleController = (worldRef as any).value!.createVehicleController(body)
   const vehicleData = { controller: vehicleController, wheels: [] as any[] }
   const worldRoot = props.object3d.parent || props.object3d
 
@@ -202,15 +182,15 @@ const setupVehicle = (body: RAPIER_TYPE.RigidBody) => {
     n.components.forEach(c => {
       if (c.type === 'VehicleWheel') {
         let wheelObj: THREE.Object3D | null = null
-        props.object3d.traverse(o => { if (o.userData.id === n.id) wheelObj = o })
+        props.object3d.traverse(o => { if (o.userData.id === n.id) wheelObj = o as THREE.Object3D })
         
         if (wheelObj) {
-          console.log(wheelObj)
+           console.log(wheelObj);
            // 标记轮子不要生成碰撞体 (重要!)
-           wheelObj.traverse(o => { o.userData.noCollision = true })
+           (wheelObj as any).traverse(o => { o.userData.noCollision = true })
 
            const config = flattenProps(c.props)
-           const calib = calibrateWheel(wheelObj as THREE.Mesh, props.object3d)
+           const calib = calibrateWheel(wheelObj as any, props.object3d)
            if (calib) {
              const finalRadius = calib.radius * (config.radiusScale || 1.0)
              
@@ -227,7 +207,7 @@ const setupVehicle = (body: RAPIER_TYPE.RigidBody) => {
              vehicleController!.setWheelSuspensionRelaxation(idx, 4.0)
 
              // 轮子分离逻辑
-             const op = wheelObj.parent
+             const op = (wheelObj as any).parent
              if (op) {
                worldRoot.attach(wheelObj)
                detachedWheels.push({ object: wheelObj, originalParent: op })
@@ -329,12 +309,12 @@ const initPhysics = () => {
 
 // 帧同步
 const { onBeforeRender } = useLoop()
-const _pos = new THREE.Vector3()
-const _quat = new THREE.Quaternion()
+// const _pos = new THREE.Vector3()
+// const _quat = new THREE.Quaternion()
 const _tempAxisY = new THREE.Vector3(0, 1, 0)
 const _tempAxisX = new THREE.Vector3(1, 0, 0)
-const _qSteer = new THREE.Quaternion()
-const _qRoll = new THREE.Quaternion()
+// const _qSteer = new THREE.Quaternion()
+// const _qRoll = new THREE.Quaternion()
 const _chassisPos = new THREE.Vector3()
 const _chassisQuat = new THREE.Quaternion()
 const _tempPos = new THREE.Vector3()

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, onUnmounted, provide, shallowRef, watch } from 'vue'
+import { inject, onUnmounted, provide, shallowRef, watch, type ShallowRef } from 'vue'
 import * as THREE from 'three'
 import { useLoop } from '@tresjs/core'
 import { IGameNode } from '../types/schema'
@@ -12,8 +12,7 @@ const props = defineProps<{
 }>()
 
 // 注入物理世界和 Rapier 实例
-const world = inject<shallowRef<RAPIER_TYPE.World>>('physics-world')!.value
-const RAPIER = inject<typeof RAPIER_TYPE>('rapier-instance')!
+const world = inject<ShallowRef<RAPIER_TYPE.World>>('physics-world')!.value
 
 // 获取组件数据
 const chassisComp = props.node.components.find(c => c.type === 'VehicleChassis')
@@ -66,7 +65,7 @@ const initVehicle = () => {
     // 2. 遍历并添加所有轮子
     pendingWheels.value.forEach((item, index) => {
       // 自动校准轮子位置和轴向
-      const calibration = calibrateWheel(item.mesh, props.object3d)
+      const calibration = calibrateWheel((item.mesh as any), props.object3d)
       if (!calibration) {
         console.warn(`[Vehicle] Failed to calibrate wheel: ${item.nodeId}`)
         return
@@ -147,9 +146,9 @@ onBeforeRender(() => {
         if (!meta || !meta.mesh) continue
         
         // --- A. 获取物理数据 ---
-        const connection = vehicleController.wheelChassisConnectionPoint(i)
+        const connection = vehicleController.wheelChassisConnectionPointCs(i)
         const suspensionLen = vehicleController.wheelSuspensionLength(i)
-        const dir = vehicleController.wheelDirection(i)
+        const dir = vehicleController.wheelDirectionCs(i)
         
         // 🟢 关键：从引擎获取当前的滚动弧度 (Rolling) 和 转向弧度 (Steering)
         const rawRotation = vehicleController.wheelRotation(i) || 0
@@ -162,7 +161,7 @@ onBeforeRender(() => {
         // --- B. 同步位置 ---
         const currentLocalPos = new THREE.Vector3()
           .copy(connection as any)
-          .addScaledVector(dir as any, suspensionLen)
+          .addScaledVector(dir as any, suspensionLen as number)
         
         meta.mesh.position.copy(currentLocalPos)
         

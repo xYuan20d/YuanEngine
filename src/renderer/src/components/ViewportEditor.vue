@@ -83,7 +83,7 @@ const onTransformChange = () => {
 const onDraggingChanged = (event: any) => {
   isGizmoDragging.value = event.value
   if (orbitControlsRef.value) {
-    const controls = orbitControlsRef.value.value || orbitControlsRef.value
+    const controls = (orbitControlsRef as any).value.value || orbitControlsRef.value
     if (controls) controls.enabled = !event.value
   }
 }
@@ -123,7 +123,7 @@ const effectProps = {
       </EffectComposerPmndrs>
     </Suspense>
 
-    <Grid :args="[1000, 1000]" :cell-size="1" :section-size="10" fade-distance="400" infinite-grid />
+    <Grid :args="[1000, 1000]" :cell-size="1" :section-size="10" :fade-distance="400" infinite-grid />
 
     <Suspense>
       <Environment preset="city" :blur="0.6" /> 

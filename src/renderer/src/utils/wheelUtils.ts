@@ -17,8 +17,8 @@ export const calibrateWheel = (
   // 1. 🔍 寻找真正的 Mesh (几何体携带者)
   let targetMesh: THREE.Mesh | null = null
   
-  if ((wheelObj as THREE.Mesh).isMesh) {
-    targetMesh = wheelObj as THREE.Mesh
+  if ((wheelObj as any).isMesh) {
+    targetMesh = wheelObj as any
   } else {
     // 如果是 Group，向下遍历找到第一个 Mesh
     wheelObj.traverse((child) => {

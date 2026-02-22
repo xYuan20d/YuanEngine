@@ -61,7 +61,7 @@ export const AssetManager = {
         if (ext === 'fbx') {
           const loader = new FBXLoader()
           const group = await loader.loadAsync(url)
-          finalScene = group
+          finalScene = group as any
           if (group.animations && group.animations.length > 0) {
             animations = group.animations
           }

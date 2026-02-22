@@ -51,7 +51,7 @@ const onPhysicsCreated = (body: any) => {
 // 注册 Three.js 对象
 watch(groupRef, (group) => {
   if (group && registry) {
-    registry.register(props.node.id, group)
+    registry.register(props.node.id, group as any)
   } else if (!group && registry) {
     // 如果 group 没了（被 v-if 移除），必须注销，否则 RuntimeRegistry 里会有死对象
     registry.unregister(props.node.id)
@@ -62,9 +62,25 @@ onUnmounted(() => {
   if (registry) registry.unregister(props.node.id)
 })
 
-const position = computed(() => [...props.node.position])
-const rotation = computed(() => [...props.node.rotation])
-const scale = computed(() => [...props.node.scale])
+const position = computed(() => new THREE.Vector3(
+  props.node.position[0], 
+  props.node.position[1], 
+  props.node.position[2]
+))
+
+// 旋转：使用 Euler (欧拉角默认顺序是 'XYZ')
+const rotation = computed(() => new THREE.Euler(
+  props.node.rotation[0], 
+  props.node.rotation[1], 
+  props.node.rotation[2]
+))
+
+// 缩放：使用 Vector3
+const scale = computed(() => new THREE.Vector3(
+  props.node.scale[0], 
+  props.node.scale[1], 
+  props.node.scale[2]
+))
 </script>
 
 <template>
@@ -136,8 +152,8 @@ const scale = computed(() => [...props.node.scale])
       <ScriptRunner 
         v-if="isPlaying.value && comp.type === 'Script'"
         :node-id="node.id"
-        :script-path="comp.props.src"
-        :user-values="comp.props.userValues"
+        :script-path="(comp.props.src as string)"
+        :user-values="(comp.props.userValues as Record<string, any>)"
         :component="comp"
       />
 
@@ -170,7 +186,7 @@ const scale = computed(() => [...props.node.scale])
     <PhysicsItem 
       v-if="isPlaying.value && groupRef"
       :node="node"
-      :object3d="groupRef"
+      :object3d="(groupRef as any)"
       @created="onPhysicsCreated"
     />
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { shallowRef, ref } from 'vue'
+import { ref } from 'vue'
 import { useLoop } from '@tresjs/core'
 import * as THREE from 'three'
 
@@ -21,7 +21,6 @@ const { onBeforeRender } = useLoop()
 const inverseMatrix = new THREE.Matrix4()
 const localBox = new THREE.Box3()
 const childBox = new THREE.Box3()
-const cornerPoint = new THREE.Vector3()
 
 // 盒子的8个顶点偏移量 (用于将子物体的 AABB 转换坐标系)
 const corners = [
